@@ -87,15 +87,15 @@ func TestParse_DayOfMonthAndDayOfWeek_ORLogic(t *testing.T) {
 	// June 19, 2024 is a Wednesday, so it matches day-of-week
 	// June 26, 2024 is a Wednesday, so it matches day-of-week
 
-	start := makeTime(2024, 6, 1, 0, 0, 0)
-	end := makeTime(2024, 7, 1, 0, 0, 0)
+	start := makeTime(2024, 6, 1, 0, 0)
+	end := makeTime(2024, 7, 1, 0, 0)
 
 	results := cs.Between(start, end)
 	expected := []time.Time{
-		makeTime(2024, 6, 5, 10, 15, 0),  // Wed (matches both)
-		makeTime(2024, 6, 12, 10, 15, 0), // Wed
-		makeTime(2024, 6, 19, 10, 15, 0), // Wed
-		makeTime(2024, 6, 26, 10, 15, 0), // Wed
+		makeTime(2024, 6, 5, 10, 15),  // Wed (matches both)
+		makeTime(2024, 6, 12, 10, 15), // Wed
+		makeTime(2024, 6, 19, 10, 15), // Wed
+		makeTime(2024, 6, 26, 10, 15), // Wed
 	}
 
 	assertTimes(t, expected, results)
@@ -271,13 +271,13 @@ func TestParse_Invalid_ImpossibleDates(t *testing.T) {
 
 func TestNext_EveryMinute(t *testing.T) {
 	cs := mustParse(t, "* * * * *")
-	after := makeTime(2024, 1, 1, 10, 30, 45)
+	after := time.Date(2024, 1, 1, 10, 30, 45, 0, time.UTC)
 
 	results := cs.Next(after, 3)
 	expected := []time.Time{
-		makeTime(2024, 1, 1, 10, 31, 0),
-		makeTime(2024, 1, 1, 10, 32, 0),
-		makeTime(2024, 1, 1, 10, 33, 0),
+		makeTime(2024, 1, 1, 10, 31),
+		makeTime(2024, 1, 1, 10, 32),
+		makeTime(2024, 1, 1, 10, 33),
 	}
 
 	assertTimes(t, expected, results)
@@ -285,13 +285,13 @@ func TestNext_EveryMinute(t *testing.T) {
 
 func TestNext_EveryHour(t *testing.T) {
 	cs := mustParse(t, "0 * * * *")
-	after := makeTime(2024, 1, 1, 10, 30, 45)
+	after := time.Date(2024, 1, 1, 10, 30, 45, 0, time.UTC)
 
 	results := cs.Next(after, 3)
 	expected := []time.Time{
-		makeTime(2024, 1, 1, 11, 0, 0),
-		makeTime(2024, 1, 1, 12, 0, 0),
-		makeTime(2024, 1, 1, 13, 0, 0),
+		makeTime(2024, 1, 1, 11, 0),
+		makeTime(2024, 1, 1, 12, 0),
+		makeTime(2024, 1, 1, 13, 0),
 	}
 
 	assertTimes(t, expected, results)
@@ -299,13 +299,13 @@ func TestNext_EveryHour(t *testing.T) {
 
 func TestNext_DailyAtSpecificTime(t *testing.T) {
 	cs := mustParse(t, "30 14 * * *")
-	after := makeTime(2024, 1, 1, 10, 0, 0)
+	after := makeTime(2024, 1, 1, 10, 0)
 
 	results := cs.Next(after, 3)
 	expected := []time.Time{
-		makeTime(2024, 1, 1, 14, 30, 0),
-		makeTime(2024, 1, 2, 14, 30, 0),
-		makeTime(2024, 1, 3, 14, 30, 0),
+		makeTime(2024, 1, 1, 14, 30),
+		makeTime(2024, 1, 2, 14, 30),
+		makeTime(2024, 1, 3, 14, 30),
 	}
 
 	assertTimes(t, expected, results)
@@ -313,12 +313,12 @@ func TestNext_DailyAtSpecificTime(t *testing.T) {
 
 func TestNext_DailyAfterTargetTime(t *testing.T) {
 	cs := mustParse(t, "30 14 * * *")
-	after := makeTime(2024, 1, 1, 15, 0, 0)
+	after := makeTime(2024, 1, 1, 15, 0)
 
 	results := cs.Next(after, 2)
 	expected := []time.Time{
-		makeTime(2024, 1, 2, 14, 30, 0),
-		makeTime(2024, 1, 3, 14, 30, 0),
+		makeTime(2024, 1, 2, 14, 30),
+		makeTime(2024, 1, 3, 14, 30),
 	}
 
 	assertTimes(t, expected, results)
@@ -326,15 +326,15 @@ func TestNext_DailyAfterTargetTime(t *testing.T) {
 
 func TestNext_DayOfWeek1Through5(t *testing.T) {
 	cs := mustParse(t, "0 9 * * 1-5")
-	after := makeTime(2024, 1, 1, 0, 0, 0) // Monday Jan 1, 2024
+	after := makeTime(2024, 1, 1, 0, 0) // Monday Jan 1, 2024
 
 	results := cs.Next(after, 5)
 	expected := []time.Time{
-		makeTime(2024, 1, 1, 9, 0, 0), // Mon
-		makeTime(2024, 1, 2, 9, 0, 0), // Tue
-		makeTime(2024, 1, 3, 9, 0, 0), // Wed
-		makeTime(2024, 1, 4, 9, 0, 0), // Thu
-		makeTime(2024, 1, 5, 9, 0, 0), // Fri
+		makeTime(2024, 1, 1, 9, 0), // Mon
+		makeTime(2024, 1, 2, 9, 0), // Tue
+		makeTime(2024, 1, 3, 9, 0), // Wed
+		makeTime(2024, 1, 4, 9, 0), // Thu
+		makeTime(2024, 1, 5, 9, 0), // Fri
 	}
 
 	assertTimes(t, expected, results)
@@ -342,14 +342,14 @@ func TestNext_DayOfWeek1Through5(t *testing.T) {
 
 func TestNext_SpecificDaysOfMonth(t *testing.T) {
 	cs := mustParse(t, "0 0 1,15 * *")
-	after := makeTime(2024, 1, 1, 0, 0, 0)
+	after := makeTime(2024, 1, 1, 0, 0)
 
 	results := cs.Next(after, 4)
 	expected := []time.Time{
-		makeTime(2024, 1, 1, 0, 0, 0),
-		makeTime(2024, 1, 15, 0, 0, 0),
-		makeTime(2024, 2, 1, 0, 0, 0),
-		makeTime(2024, 2, 15, 0, 0, 0),
+		makeTime(2024, 1, 15, 0, 0), // Skip current time at Jan 1
+		makeTime(2024, 2, 1, 0, 0),
+		makeTime(2024, 2, 15, 0, 0),
+		makeTime(2024, 3, 1, 0, 0),
 	}
 
 	assertTimes(t, expected, results)
@@ -357,13 +357,13 @@ func TestNext_SpecificDaysOfMonth(t *testing.T) {
 
 func TestNext_MonthBoundary(t *testing.T) {
 	cs := mustParse(t, "0 0 * * *")
-	after := makeTime(2024, 1, 30, 10, 0, 0)
+	after := makeTime(2024, 1, 30, 10, 0)
 
 	results := cs.Next(after, 3)
 	expected := []time.Time{
-		makeTime(2024, 1, 31, 0, 0, 0),
-		makeTime(2024, 2, 1, 0, 0, 0),
-		makeTime(2024, 2, 2, 0, 0, 0),
+		makeTime(2024, 1, 31, 0, 0),
+		makeTime(2024, 2, 1, 0, 0),
+		makeTime(2024, 2, 2, 0, 0),
 	}
 
 	assertTimes(t, expected, results)
@@ -371,13 +371,13 @@ func TestNext_MonthBoundary(t *testing.T) {
 
 func TestNext_YearBoundary(t *testing.T) {
 	cs := mustParse(t, "0 0 * * *")
-	after := makeTime(2024, 12, 30, 10, 0, 0)
+	after := makeTime(2024, 12, 30, 10, 0)
 
 	results := cs.Next(after, 3)
 	expected := []time.Time{
-		makeTime(2024, 12, 31, 0, 0, 0),
-		makeTime(2025, 1, 1, 0, 0, 0),
-		makeTime(2025, 1, 2, 0, 0, 0),
+		makeTime(2024, 12, 31, 0, 0),
+		makeTime(2025, 1, 1, 0, 0),
+		makeTime(2025, 1, 2, 0, 0),
 	}
 
 	assertTimes(t, expected, results)
@@ -385,11 +385,11 @@ func TestNext_YearBoundary(t *testing.T) {
 
 func TestNext_LeapYear_Feb29(t *testing.T) {
 	cs := mustParse(t, "0 0 29 2 *")
-	after := makeTime(2024, 1, 1, 0, 0, 0)
+	after := makeTime(2024, 1, 1, 0, 0)
 
 	results := cs.Next(after, 1)
 	expected := []time.Time{
-		makeTime(2024, 2, 29, 0, 0, 0),
+		makeTime(2024, 2, 29, 0, 0),
 	}
 
 	assertTimes(t, expected, results)
@@ -397,11 +397,11 @@ func TestNext_LeapYear_Feb29(t *testing.T) {
 
 func TestNext_LeapYear_SkipNonLeapYears(t *testing.T) {
 	cs := mustParse(t, "0 0 29 2 *")
-	after := makeTime(2025, 1, 1, 0, 0, 0) // 2025 is not a leap year
+	after := makeTime(2025, 1, 1, 0, 0) // 2025 is not a leap year
 
 	results := cs.Next(after, 1)
 	expected := []time.Time{
-		makeTime(2028, 2, 29, 0, 0, 0), // next leap year
+		makeTime(2028, 2, 29, 0, 0), // next leap year
 	}
 
 	assertTimes(t, expected, results)
@@ -409,18 +409,18 @@ func TestNext_LeapYear_SkipNonLeapYears(t *testing.T) {
 
 func TestNext_LastDayOfMonth(t *testing.T) {
 	cs := mustParse(t, "0 0 31 * *")
-	after := makeTime(2024, 1, 1, 0, 0, 0)
+	after := makeTime(2024, 1, 1, 0, 0)
 
 	// Should only match months with 31 days
 	results := cs.Next(after, 7)
 	expected := []time.Time{
-		makeTime(2024, 1, 31, 0, 0, 0), // Jan
-		makeTime(2024, 3, 31, 0, 0, 0), // Mar
-		makeTime(2024, 5, 31, 0, 0, 0), // May
-		makeTime(2024, 7, 31, 0, 0, 0), // Jul
-		makeTime(2024, 8, 31, 0, 0, 0), // Aug
-		makeTime(2024, 10, 31, 0, 0, 0), // Oct
-		makeTime(2024, 12, 31, 0, 0, 0), // Dec
+		makeTime(2024, 1, 31, 0, 0), // Jan
+		makeTime(2024, 3, 31, 0, 0), // Mar
+		makeTime(2024, 5, 31, 0, 0), // May
+		makeTime(2024, 7, 31, 0, 0), // Jul
+		makeTime(2024, 8, 31, 0, 0), // Aug
+		makeTime(2024, 10, 31, 0, 0), // Oct
+		makeTime(2024, 12, 31, 0, 0), // Dec
 	}
 
 	assertTimes(t, expected, results)
@@ -430,8 +430,8 @@ func TestNext_LastDayOfMonth(t *testing.T) {
 
 func TestBetween_EveryMinute_OneHour(t *testing.T) {
 	cs := mustParse(t, "* * * * *")
-	start := makeTime(2024, 1, 1, 10, 0, 0)
-	end := makeTime(2024, 1, 1, 11, 0, 0)
+	start := makeTime(2024, 1, 1, 10, 0)
+	end := makeTime(2024, 1, 1, 11, 0)
 
 	results := cs.Between(start, end)
 
@@ -441,18 +441,18 @@ func TestBetween_EveryMinute_OneHour(t *testing.T) {
 	}
 
 	// Verify first and last
-	if !results[0].Equal(makeTime(2024, 1, 1, 10, 0, 0)) {
+	if !results[0].Equal(makeTime(2024, 1, 1, 10, 0)) {
 		t.Errorf("first occurrence wrong: %v", results[0])
 	}
-	if !results[59].Equal(makeTime(2024, 1, 1, 10, 59, 0)) {
+	if !results[59].Equal(makeTime(2024, 1, 1, 10, 59)) {
 		t.Errorf("last occurrence wrong: %v", results[59])
 	}
 }
 
 func TestBetween_EveryHour_OneDay(t *testing.T) {
 	cs := mustParse(t, "0 * * * *")
-	start := makeTime(2024, 1, 1, 0, 0, 0)
-	end := makeTime(2024, 1, 2, 0, 0, 0)
+	start := makeTime(2024, 1, 1, 0, 0)
+	end := makeTime(2024, 1, 2, 0, 0)
 
 	results := cs.Between(start, end)
 
@@ -463,8 +463,8 @@ func TestBetween_EveryHour_OneDay(t *testing.T) {
 
 func TestBetween_Daily_OneWeek(t *testing.T) {
 	cs := mustParse(t, "0 0 * * *")
-	start := makeTime(2024, 1, 1, 0, 0, 0)
-	end := makeTime(2024, 1, 8, 0, 0, 0)
+	start := makeTime(2024, 1, 1, 0, 0)
+	end := makeTime(2024, 1, 8, 0, 0)
 
 	results := cs.Between(start, end)
 
@@ -475,8 +475,8 @@ func TestBetween_Daily_OneWeek(t *testing.T) {
 
 func TestBetween_DayOfWeek1Through5_TwoWeeks(t *testing.T) {
 	cs := mustParse(t, "0 9 * * 1-5")
-	start := makeTime(2024, 1, 1, 0, 0, 0) // Monday
-	end := makeTime(2024, 1, 15, 0, 0, 0)
+	start := makeTime(2024, 1, 1, 0, 0) // Monday
+	end := makeTime(2024, 1, 15, 0, 0)
 
 	results := cs.Between(start, end)
 
@@ -487,8 +487,8 @@ func TestBetween_DayOfWeek1Through5_TwoWeeks(t *testing.T) {
 
 func TestBetween_EmptyResult_NonLeapYear(t *testing.T) {
 	cs := mustParse(t, "0 0 29 2 *")
-	start := makeTime(2025, 2, 1, 0, 0, 0) // 2025 is not a leap year
-	end := makeTime(2025, 3, 1, 0, 0, 0)
+	start := makeTime(2025, 2, 1, 0, 0) // 2025 is not a leap year
+	end := makeTime(2025, 3, 1, 0, 0)
 
 	results := cs.Between(start, end)
 
@@ -499,14 +499,14 @@ func TestBetween_EmptyResult_NonLeapYear(t *testing.T) {
 
 func TestBetween_BoundariesInclusiveExclusive(t *testing.T) {
 	cs := mustParse(t, "0 * * * *")
-	start := makeTime(2024, 1, 1, 10, 0, 0)
-	end := makeTime(2024, 1, 1, 13, 0, 0)
+	start := makeTime(2024, 1, 1, 10, 0)
+	end := makeTime(2024, 1, 1, 13, 0)
 
 	results := cs.Between(start, end)
 	expected := []time.Time{
-		makeTime(2024, 1, 1, 10, 0, 0),
-		makeTime(2024, 1, 1, 11, 0, 0),
-		makeTime(2024, 1, 1, 12, 0, 0),
+		makeTime(2024, 1, 1, 10, 0),
+		makeTime(2024, 1, 1, 11, 0),
+		makeTime(2024, 1, 1, 12, 0),
 	}
 
 	assertTimes(t, expected, results)
@@ -514,8 +514,8 @@ func TestBetween_BoundariesInclusiveExclusive(t *testing.T) {
 
 func TestBetween_LargeWindow_OneWeek_EveryMinute(t *testing.T) {
 	cs := mustParse(t, "* * * * *")
-	start := makeTime(2024, 1, 1, 0, 0, 0)
-	end := makeTime(2024, 1, 8, 0, 0, 0)
+	start := makeTime(2024, 1, 1, 0, 0)
+	end := makeTime(2024, 1, 8, 0, 0)
 
 	results := cs.Between(start, end)
 
@@ -527,8 +527,8 @@ func TestBetween_LargeWindow_OneWeek_EveryMinute(t *testing.T) {
 
 func TestBetween_Sparse_Monthly(t *testing.T) {
 	cs := mustParse(t, "0 0 1 * *")
-	start := makeTime(2024, 1, 1, 0, 0, 0)
-	end := makeTime(2024, 12, 31, 23, 59, 59)
+	start := makeTime(2024, 1, 1, 0, 0)
+	end := time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC)
 
 	results := cs.Between(start, end)
 
@@ -541,13 +541,13 @@ func TestBetween_Sparse_Monthly(t *testing.T) {
 
 func TestDayLogic_OnlyDayOfMonthRestricted(t *testing.T) {
 	cs := mustParse(t, "0 0 15 * *") // 15th of every month
-	after := makeTime(2024, 1, 1, 0, 0, 0)
+	after := makeTime(2024, 1, 1, 0, 0)
 
 	results := cs.Next(after, 3)
 	expected := []time.Time{
-		makeTime(2024, 1, 15, 0, 0, 0), // Mon
-		makeTime(2024, 2, 15, 0, 0, 0), // Thu
-		makeTime(2024, 3, 15, 0, 0, 0), // Fri
+		makeTime(2024, 1, 15, 0, 0), // Mon
+		makeTime(2024, 2, 15, 0, 0), // Thu
+		makeTime(2024, 3, 15, 0, 0), // Fri
 	}
 
 	assertTimes(t, expected, results)
@@ -555,13 +555,13 @@ func TestDayLogic_OnlyDayOfMonthRestricted(t *testing.T) {
 
 func TestDayLogic_OnlyDayOfWeekRestricted(t *testing.T) {
 	cs := mustParse(t, "0 0 * * 1") // Every Monday
-	after := makeTime(2024, 1, 1, 0, 0, 0)
+	after := makeTime(2024, 1, 1, 0, 0)
 
 	results := cs.Next(after, 3)
 	expected := []time.Time{
-		makeTime(2024, 1, 1, 0, 0, 0),  // Mon Jan 1
-		makeTime(2024, 1, 8, 0, 0, 0),  // Mon Jan 8
-		makeTime(2024, 1, 15, 0, 0, 0), // Mon Jan 15
+		makeTime(2024, 1, 8, 0, 0),  // Mon Jan 8 (skip current time at Jan 1)
+		makeTime(2024, 1, 15, 0, 0), // Mon Jan 15
+		makeTime(2024, 1, 22, 0, 0), // Mon Jan 22
 	}
 
 	assertTimes(t, expected, results)
@@ -570,8 +570,8 @@ func TestDayLogic_OnlyDayOfWeekRestricted(t *testing.T) {
 func TestDayLogic_BothRestricted_ORLogic(t *testing.T) {
 	// 1st of month OR Monday (whichever comes first)
 	cs := mustParse(t, "0 0 1 * 1")
-	start := makeTime(2024, 1, 1, 0, 0, 0) // Monday Jan 1 (matches both!)
-	end := makeTime(2024, 2, 1, 0, 0, 0)
+	start := makeTime(2024, 1, 1, 0, 0) // Monday Jan 1 (matches both!)
+	end := makeTime(2024, 2, 1, 0, 0)
 
 	results := cs.Between(start, end)
 
@@ -584,8 +584,8 @@ func TestDayLogic_BothRestricted_ORLogic(t *testing.T) {
 
 func TestDayLogic_BothRestricted_15thOrFriday(t *testing.T) {
 	cs := mustParse(t, "0 0 15 * 5") // 15th OR Friday
-	start := makeTime(2024, 1, 1, 0, 0, 0)
-	end := makeTime(2024, 2, 1, 0, 0, 0)
+	start := makeTime(2024, 1, 1, 0, 0)
+	end := makeTime(2024, 2, 1, 0, 0)
 
 	results := cs.Between(start, end)
 
@@ -598,13 +598,13 @@ func TestDayLogic_BothRestricted_15thOrFriday(t *testing.T) {
 
 func TestDayLogic_BothUnrestricted(t *testing.T) {
 	cs := mustParse(t, "0 0 * * *") // Every day
-	after := makeTime(2024, 1, 1, 0, 0, 0)
+	after := makeTime(2024, 1, 1, 0, 0)
 
 	results := cs.Next(after, 3)
 	expected := []time.Time{
-		makeTime(2024, 1, 1, 0, 0, 0),
-		makeTime(2024, 1, 2, 0, 0, 0),
-		makeTime(2024, 1, 3, 0, 0, 0),
+		makeTime(2024, 1, 2, 0, 0), // Skip current time at Jan 1
+		makeTime(2024, 1, 3, 0, 0),
+		makeTime(2024, 1, 4, 0, 0),
 	}
 
 	assertTimes(t, expected, results)
@@ -618,7 +618,7 @@ func TestEdgeCase_MidnightBoundary(t *testing.T) {
 
 	results := cs.Next(after, 1)
 	expected := []time.Time{
-		makeTime(2024, 1, 2, 0, 0, 0),
+		makeTime(2024, 1, 2, 0, 0),
 	}
 
 	assertTimes(t, expected, results)
@@ -630,7 +630,7 @@ func TestEdgeCase_TimeTruncation(t *testing.T) {
 
 	results := cs.Next(after, 1)
 	expected := []time.Time{
-		makeTime(2024, 1, 2, 14, 30, 0), // Next day, not today
+		makeTime(2024, 1, 2, 14, 30), // Next day, not today
 	}
 
 	assertTimes(t, expected, results)
@@ -638,11 +638,11 @@ func TestEdgeCase_TimeTruncation(t *testing.T) {
 
 func TestEdgeCase_AlreadyAtScheduledTime(t *testing.T) {
 	cs := mustParse(t, "30 14 * * *")
-	after := makeTime(2024, 1, 1, 14, 30, 0)
+	after := makeTime(2024, 1, 1, 14, 30)
 
 	results := cs.Next(after, 1)
 	expected := []time.Time{
-		makeTime(2024, 1, 2, 14, 30, 0), // Next occurrence, not current
+		makeTime(2024, 1, 2, 14, 30), // Next occurrence, not current
 	}
 
 	assertTimes(t, expected, results)
@@ -650,15 +650,15 @@ func TestEdgeCase_AlreadyAtScheduledTime(t *testing.T) {
 
 func TestEdgeCase_StepNotAligned(t *testing.T) {
 	cs := mustParse(t, "*/7 * * * *") // Every 7 minutes
-	after := makeTime(2024, 1, 1, 10, 0, 0)
+	after := makeTime(2024, 1, 1, 10, 0)
 
 	results := cs.Next(after, 5)
 	expected := []time.Time{
-		makeTime(2024, 1, 1, 10, 0, 0),
-		makeTime(2024, 1, 1, 10, 7, 0),
-		makeTime(2024, 1, 1, 10, 14, 0),
-		makeTime(2024, 1, 1, 10, 21, 0),
-		makeTime(2024, 1, 1, 10, 28, 0),
+		makeTime(2024, 1, 1, 10, 7),  // Skip current time at 10:00
+		makeTime(2024, 1, 1, 10, 14),
+		makeTime(2024, 1, 1, 10, 21),
+		makeTime(2024, 1, 1, 10, 28),
+		makeTime(2024, 1, 1, 10, 35),
 	}
 
 	assertTimes(t, expected, results)
@@ -666,8 +666,8 @@ func TestEdgeCase_StepNotAligned(t *testing.T) {
 
 func TestEdgeCase_EndOfMonthWith30Days(t *testing.T) {
 	cs := mustParse(t, "0 0 31 * *")
-	start := makeTime(2024, 4, 1, 0, 0, 0) // April has 30 days
-	end := makeTime(2024, 5, 1, 0, 0, 0)
+	start := makeTime(2024, 4, 1, 0, 0) // April has 30 days
+	end := makeTime(2024, 5, 1, 0, 0)
 
 	results := cs.Between(start, end)
 
@@ -678,8 +678,8 @@ func TestEdgeCase_EndOfMonthWith30Days(t *testing.T) {
 
 func TestEdgeCase_BetweenStartAfterEnd(t *testing.T) {
 	cs := mustParse(t, "* * * * *")
-	start := makeTime(2024, 1, 2, 0, 0, 0)
-	end := makeTime(2024, 1, 1, 0, 0, 0)
+	start := makeTime(2024, 1, 2, 0, 0)
+	end := makeTime(2024, 1, 1, 0, 0)
 
 	results := cs.Between(start, end)
 
@@ -690,8 +690,8 @@ func TestEdgeCase_BetweenStartAfterEnd(t *testing.T) {
 
 func TestEdgeCase_BetweenStartEqualEnd(t *testing.T) {
 	cs := mustParse(t, "* * * * *")
-	start := makeTime(2024, 1, 1, 10, 0, 0)
-	end := makeTime(2024, 1, 1, 10, 0, 0)
+	start := makeTime(2024, 1, 1, 10, 0)
+	end := makeTime(2024, 1, 1, 10, 0)
 
 	results := cs.Between(start, end)
 
@@ -710,7 +710,7 @@ func BenchmarkParse(b *testing.B) {
 
 func BenchmarkNext_EveryMinute(b *testing.B) {
 	cs, _ := Parse("* * * * *")
-	after := makeTime(2024, 1, 1, 0, 0, 0)
+	after := makeTime(2024, 1, 1, 0, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -720,7 +720,7 @@ func BenchmarkNext_EveryMinute(b *testing.B) {
 
 func BenchmarkNext_Daily(b *testing.B) {
 	cs, _ := Parse("0 0 * * *")
-	after := makeTime(2024, 1, 1, 0, 0, 0)
+	after := makeTime(2024, 1, 1, 0, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -730,8 +730,8 @@ func BenchmarkNext_Daily(b *testing.B) {
 
 func BenchmarkBetween_OneWeek(b *testing.B) {
 	cs, _ := Parse("0 * * * *")
-	start := makeTime(2024, 1, 1, 0, 0, 0)
-	end := makeTime(2024, 1, 8, 0, 0, 0)
+	start := makeTime(2024, 1, 1, 0, 0)
+	end := makeTime(2024, 1, 8, 0, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -741,8 +741,8 @@ func BenchmarkBetween_OneWeek(b *testing.B) {
 
 func BenchmarkBetween_OneYear(b *testing.B) {
 	cs, _ := Parse("0 0 * * *")
-	start := makeTime(2024, 1, 1, 0, 0, 0)
-	end := makeTime(2025, 1, 1, 0, 0, 0)
+	start := makeTime(2024, 1, 1, 0, 0)
+	end := makeTime(2025, 1, 1, 0, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
