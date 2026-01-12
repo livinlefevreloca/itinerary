@@ -126,7 +126,6 @@ func parseStep(field string, min, max int) ([]int, error) {
 		return nil, fmt.Errorf("invalid step range")
 	}
 
-	// Apply step
 	result := []int{}
 	for i := 0; i < len(rangeVals); i += step {
 		result = append(result, rangeVals[i])
