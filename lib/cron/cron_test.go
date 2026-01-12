@@ -61,7 +61,7 @@ func TestParse_Valid_SingleValues(t *testing.T) {
 		expr string
 		desc string
 	}{
-		{"15 10 5 6 3", "specific time"},
+		{"15 10 5 6 3", "June 5th OR Wednesdays in June at 10:15"},
 		{"0 0 1 1 *", "January 1st"},
 		{"30 14 * * *", "2:30 PM daily"},
 	}
@@ -74,6 +74,31 @@ func TestParse_Valid_SingleValues(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParse_DayOfMonthAndDayOfWeek_ORLogic(t *testing.T) {
+	// When both day-of-month and day-of-week are specified (not *),
+	// the schedule matches if EITHER condition is true (OR logic)
+	cs := mustParse(t, "15 10 5 6 3") // June 5th OR Wednesdays in June at 10:15
+
+	// Test in June 2024
+	// June 5, 2024 is a Wednesday, so it matches both conditions
+	// June 12, 2024 is a Wednesday, so it matches day-of-week
+	// June 19, 2024 is a Wednesday, so it matches day-of-week
+	// June 26, 2024 is a Wednesday, so it matches day-of-week
+
+	start := makeTime(2024, 6, 1, 0, 0, 0)
+	end := makeTime(2024, 7, 1, 0, 0, 0)
+
+	results := cs.Between(start, end)
+	expected := []time.Time{
+		makeTime(2024, 6, 5, 10, 15, 0),  // Wed (matches both)
+		makeTime(2024, 6, 12, 10, 15, 0), // Wed
+		makeTime(2024, 6, 19, 10, 15, 0), // Wed
+		makeTime(2024, 6, 26, 10, 15, 0), // Wed
+	}
+
+	assertTimes(t, expected, results)
 }
 
 func TestParse_Valid_Lists(t *testing.T) {
