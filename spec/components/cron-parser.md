@@ -27,7 +27,7 @@ minute hour day-of-month month day-of-week
 ## Data Structures
 
 ```go
-package scheduler
+package cron
 
 import "time"
 
@@ -261,7 +261,7 @@ Parse errors returned for:
 ## File Structure
 
 ```
-internal/scheduler/cron/
+lib/cron/
 ├── cron.go           # Main CronSchedule type and public API
 ├── parser.go         # Parsing logic
 ├── matcher.go        # Occurrence matching logic
