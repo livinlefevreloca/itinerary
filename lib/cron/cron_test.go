@@ -128,11 +128,11 @@ func TestParse_Valid_Ranges(t *testing.T) {
 		expr string
 		desc string
 	}{
-		{"0-59 * * * *", "all minutes via range"},
-		{"0 9-17 * * *", "9am to 5pm"},
-		{"0 0 * * 1-5", "weekdays"},
-		{"0 0 1-7 * *", "first week"},
-		{"0 0 * 1-3 *", "Q1"},
+		{"0-59 * * * *", "minutes 0-59"},
+		{"0 9-17 * * *", "hours 9-17"},
+		{"0 0 * * 1-5", "day-of-week 1-5"},
+		{"0 0 1-7 * *", "day-of-month 1-7"},
+		{"0 0 * 1-3 *", "months 1-3"},
 	}
 
 	for _, tt := range tests {
@@ -174,10 +174,10 @@ func TestParse_Valid_Complex(t *testing.T) {
 		expr string
 		desc string
 	}{
-		{"*/15 9-17 * * 1-5", "every 15 min, 9-5, weekdays"},
-		{"0,30 8-18 * * *", "half-hourly 8am-6pm"},
-		{"0 0 1,15 * 1", "1st, 15th, and Mondays"},
-		{"0 */6 * * *", "every 6 hours"},
+		{"*/15 9-17 * * 1-5", "minutes */15, hours 9-17, day-of-week 1-5"},
+		{"0,30 8-18 * * *", "minutes 0,30, hours 8-18"},
+		{"0 0 1,15 * 1", "day-of-month 1,15 OR day-of-week 1"},
+		{"0 */6 * * *", "hours */6"},
 	}
 
 	for _, tt := range tests {
@@ -324,7 +324,7 @@ func TestNext_DailyAfterTargetTime(t *testing.T) {
 	assertTimes(t, expected, results)
 }
 
-func TestNext_Weekdays(t *testing.T) {
+func TestNext_DayOfWeek1Through5(t *testing.T) {
 	cs := mustParse(t, "0 9 * * 1-5")
 	after := makeTime(2024, 1, 1, 0, 0, 0) // Monday Jan 1, 2024
 
@@ -473,7 +473,7 @@ func TestBetween_Daily_OneWeek(t *testing.T) {
 	}
 }
 
-func TestBetween_Weekdays_TwoWeeks(t *testing.T) {
+func TestBetween_DayOfWeek1Through5_TwoWeeks(t *testing.T) {
 	cs := mustParse(t, "0 9 * * 1-5")
 	start := makeTime(2024, 1, 1, 0, 0, 0) // Monday
 	end := makeTime(2024, 1, 15, 0, 0, 0)
@@ -481,7 +481,7 @@ func TestBetween_Weekdays_TwoWeeks(t *testing.T) {
 	results := cs.Between(start, end)
 
 	if len(results) != 10 {
-		t.Errorf("expected 10 occurrences (2 weeks × 5 weekdays), got %d", len(results))
+		t.Errorf("expected 10 occurrences (2 weeks, day-of-week 1-5), got %d", len(results))
 	}
 }
 
