@@ -45,6 +45,7 @@ show_help() {
     echo ""
     echo -e "${GREEN}COMMON OPTIONS:${NC}"
     echo "    --mem                   Show memory allocation statistics (for benchmarks)"
+    echo "    --no-cache              Disable test result caching (adds -count=1)"
     echo "    --timeout DURATION      Set timeout (default: 30m for benchmarks, 10m for tests)"
     echo "    -v, --verbose           Verbose test output"
     echo "    --help                  Show this help message"
@@ -53,8 +54,8 @@ show_help() {
     echo "    # Run all tests"
     echo "    ./test.sh --test"
     echo ""
-    echo "    # Run tests matching \"Parse\""
-    echo "    ./test.sh --test Parse"
+    echo "    # Run tests matching \"Parse\" without cache"
+    echo "    ./test.sh --test Parse --no-cache"
     echo ""
     echo "    # Run parsing benchmark for 1000 schedules"
     echo "    ./test.sh --bench --parse 1000"
@@ -144,6 +145,10 @@ build_test_cmd() {
 
     if [[ "$VERBOSE" == "true" ]]; then
         cmd="$cmd -v"
+    fi
+
+    if [[ "$NO_CACHE" == "true" ]]; then
+        cmd="$cmd -count=1"
     fi
 
     if [[ -n "$TIMEOUT" ]]; then
@@ -280,8 +285,11 @@ run_all_bench() {
 # Parse arguments
 SHOW_MEM=false
 VERBOSE=false
+NO_CACHE=false
 TIMEOUT=""
 BENCH_MODE=false
+ACTION=""
+ACTION_ARGS=()
 
 if [[ $# -eq 0 ]]; then
     show_help
@@ -295,13 +303,12 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         --test)
+            ACTION="test"
             shift
             if [[ $# -gt 0 && ! $1 =~ ^-- ]]; then
-                TEST_PATTERN=$1
+                ACTION_ARGS=("$1")
                 shift
             fi
-            run_tests "$TEST_PATTERN"
-            exit 0
             ;;
         --bench)
             BENCH_MODE=true
@@ -311,61 +318,65 @@ while [[ $# -gt 0 ]]; do
             if [[ "$BENCH_MODE" != "true" ]]; then
                 error "--parse requires --bench flag"
             fi
+            ACTION="parse"
             shift
             if [[ $# -eq 0 ]]; then
                 error "--parse requires a schedule count argument"
             fi
-            run_parse_bench "$1"
-            exit 0
+            ACTION_ARGS=("$1")
+            shift
             ;;
         --match)
             if [[ "$BENCH_MODE" != "true" ]]; then
                 error "--match requires --bench flag"
             fi
+            ACTION="match"
             shift
             if [[ $# -lt 2 ]]; then
                 error "--match requires two arguments: COUNT and WINDOW"
             fi
-            run_match_bench "$1" "$2"
-            exit 0
+            ACTION_ARGS=("$1" "$2")
+            shift 2
             ;;
         --pattern)
             if [[ "$BENCH_MODE" != "true" ]]; then
                 error "--pattern requires --bench flag"
             fi
+            ACTION="pattern"
             shift
             if [[ $# -eq 0 ]]; then
                 error "--pattern requires a pattern argument"
             fi
-            run_bench_pattern "$1"
-            exit 0
+            ACTION_ARGS=("$1")
+            shift
             ;;
         --all-parse)
             if [[ "$BENCH_MODE" != "true" ]]; then
                 error "--all-parse requires --bench flag"
             fi
+            ACTION="all-parse"
             shift
-            run_all_parse
-            exit 0
             ;;
         --all-match)
             if [[ "$BENCH_MODE" != "true" ]]; then
                 error "--all-match requires --bench flag"
             fi
+            ACTION="all-match"
             shift
-            run_all_match
-            exit 0
             ;;
         --all)
             if [[ "$BENCH_MODE" != "true" ]]; then
                 error "--all requires --bench flag"
             fi
+            ACTION="all"
             shift
-            run_all_bench
-            exit 0
             ;;
         --mem)
             SHOW_MEM=true
+            shift
+            ;;
+        --no-cache)
+            NO_CACHE=true
             shift
             ;;
         --timeout)
@@ -386,5 +397,33 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# If we get here, show help
-show_help
+# Execute the action
+case $ACTION in
+    test)
+        run_tests "${ACTION_ARGS[@]}"
+        ;;
+    parse)
+        run_parse_bench "${ACTION_ARGS[@]}"
+        ;;
+    match)
+        run_match_bench "${ACTION_ARGS[@]}"
+        ;;
+    pattern)
+        run_bench_pattern "${ACTION_ARGS[@]}"
+        ;;
+    all-parse)
+        run_all_parse
+        ;;
+    all-match)
+        run_all_match
+        ;;
+    all)
+        run_all_bench
+        ;;
+    "")
+        show_help
+        ;;
+    *)
+        error "Unknown action: $ACTION"
+        ;;
+esac
