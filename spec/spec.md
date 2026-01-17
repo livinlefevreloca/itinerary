@@ -24,17 +24,96 @@ itinerary highly customizable scheduler that orchestrates and monitors jobs runn
 This section defines the components of the scheduler and how they fit together
 
 ### Central scheduler
-* The scheduler loop itself should operate as an event loop. On startup it reads the schedule into memory
-* Jobs themsevleves are orchestrated via a PRE_SCHEDULE_INTERVAL.
-* This is an amount of time before a job is supposed to start in which the loop will start a go routine to kick off the job prior to the actual time. This allows paralellism of the actual job running.
-* The go routine sits in a select loop waiting for it to the time for the job to start
-* Each iteration of the loop will do the following
-  - Check if the schedule has been updated. If so reload it into memory
-  - Check for jobs that need to run in within the interval. Kick off orchestrator go routines for all of these. Record this job has scheduled in local memory
-  - Check for any jobs in a scheduled state that need to be cancelled. IF any are found send the cancel signal to these jobs
-  - Handle events in the main loops "inbox". The inbox is a priority queue with the sender specifying a priority
-  - Kick off any local meta tasks that are scheduled
-* A very important invariant of the main loop is that it never does any IO. It outsources all external communication to other go routines
+The central scheduler is the heart of the application and operates as an event loop.
+
+#### Core Principles
+* **Single Source of Truth**: The main loop owns all scheduling state. Any component that needs state must send a request to the inbox and wait for a response.
+* **No I/O in Loop**: The loop never performs I/O operations. All external communication is delegated to other goroutines.
+* **Request/Response Pattern**: Components communicate with the loop via inbox messages that can include response channels.
+
+#### Startup
+* Load configuration (intervals, windows, etc.)
+* Load job definitions from database (read-only connection)
+* Build initial ScheduledRunIndex
+* Initialize state:
+  - Active orchestrators map (runID → orchestrator state)
+  - Inbox (buffered channel for events)
+  - Shutdown signal channel
+
+#### Configuration Parameters
+* **PRE_SCHEDULE_INTERVAL**: Time before a job starts to launch its orchestrator (default: 10 seconds, configurable)
+* **INDEX_REBUILD_INTERVAL**: How often to rebuild the index (default: 1 minute, configurable, must be < LOOKAHEAD_WINDOW)
+* **LOOKAHEAD_WINDOW**: How far ahead to calculate runs (default: 10 minutes, configurable)
+* **GRACE_PERIOD**: How far back to include runs in index to catch near-misses (default: 30 seconds, configurable)
+* **LOOP_INTERVAL**: How often the main loop runs (default: 1 second)
+
+#### Main Loop Iteration
+Each iteration processes:
+
+1. **Check for shutdown signal**
+   - If received, cancel all active orchestrators and exit gracefully
+
+2. **Rebuild index if needed**
+   - If (now - lastRebuild) > INDEX_REBUILD_INTERVAL
+   - Generate runs for window: (now - GRACE_PERIOD, now + LOOKAHEAD_WINDOW)
+   - Atomically swap index
+   - No I/O - uses in-memory job list
+
+3. **Schedule new orchestrators**
+   - Query index for jobs in (now, now + PRE_SCHEDULE_INTERVAL)
+   - For each run not in activeOrchestrators map:
+     - Generate unique runID
+     - Launch orchestrator goroutine
+     - Record in activeOrchestrators[runID] with metadata
+   - No I/O - just goroutine spawning
+
+4. **Process all inbox messages**
+   - Handle every message in the inbox (not priority-based)
+   - Message types:
+     - State queries (respond with current state)
+     - Cancellation requests (signal orchestrator)
+     - Orchestrator completion notifications
+     - Schedule update notifications (trigger rebuild)
+     - Stats requests
+   - Messages may include response channels for request/response pattern
+
+5. **Clean up completed orchestrators**
+   - Remove entries from activeOrchestrators where:
+     - Orchestrator has completed AND
+     - now > startTime + GRACE_PERIOD
+   - This prevents re-running fast jobs that complete within grace period
+
+6. **Record state changes**
+   - Collect all state changes from this iteration
+   - Send to syncer goroutines for database persistence
+   - No I/O in main loop - syncers handle writes
+
+7. **Update statistics**
+   - Track loop iteration metrics
+   - Send to stats syncer
+
+#### State Management
+The main loop maintains:
+* **activeOrchestrators**: Map of runID → orchestrator metadata
+  - Includes: jobID, scheduledTime, actualStartTime, status, cancel channel
+  - Entries removed only after completion AND grace period expiration
+* **jobDefinitions**: In-memory copy of all job schedules
+* **index**: ScheduledRunIndex for efficient time-based queries
+* **stats**: Current iteration statistics
+
+#### Orchestrator Lifecycle
+1. Main loop creates orchestrator goroutine
+2. Orchestrator runs (pre-exec, exec, post-exec phases)
+3. Orchestrator sends completion message to inbox
+4. Main loop marks as completed in activeOrchestrators
+5. After GRACE_PERIOD expires, main loop removes from map
+
+#### Communication Patterns
+* **External → Loop**: Watcher goroutine receives gRPC requests, sends to inbox
+* **Loop → Orchestrators**: Via cancel channels
+* **Orchestrators → Loop**: Via inbox messages (completion, errors)
+* **Loop → Syncers**: Via syncer-specific channels (state changes)
+* **Loop → External**: Via response channels in inbox messages
 
 
 ### Orchestrator
