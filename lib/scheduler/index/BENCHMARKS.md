@@ -17,8 +17,8 @@ The Scheduled Run Index uses a sorted slice with atomic pointer swapping for loc
 
 Building the index involves copying the input slice, sorting by (ScheduledAt, JobID), and storing via atomic pointer.
 
-| Runs | Time/op | Memory | Allocs |
-|------|---------|--------|--------|
+| Index Size | Time/op | Memory | Allocs |
+|------------|---------|--------|--------|
 | 10 | 240 ns | 568 B | 6 |
 | 100 | 7.0 µs | 4.2 KB | 6 |
 | 1,000 | 111 µs | 40 KB | 6 |
@@ -103,8 +103,8 @@ Simulates scheduler behavior: 10,000 jobs with varying schedules (every minute, 
 
 Atomically replacing the index with new data.
 
-| Runs | Time/op | Memory | Allocs |
-|------|---------|--------|--------|
+| Index Size | Time/op | Memory | Allocs |
+|------------|---------|--------|--------|
 | 1,000 | 114 µs | 40 KB | 5 |
 | 10,000 | 1.5 ms | 392 KB | 5 |
 | 100,000 | 17 ms | 3.9 MB | 5 |
@@ -127,8 +127,8 @@ Readers continue using old index during swap. Old index GC'd when all readers fi
 
 ### Build Memory
 
-| Runs | Bytes/op | Allocs/op |
-|------|----------|-----------|
+| Index Size | Bytes/op | Allocs/op |
+|------------|----------|-----------|
 | 1,000 | 41,112 | 6 |
 | 10,000 | 401,561 | 6 |
 | 100,000 | 4,006,040 | 6 |
