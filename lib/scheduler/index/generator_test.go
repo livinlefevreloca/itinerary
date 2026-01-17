@@ -14,18 +14,30 @@ func generateUnsortedRuns(count int, startTime time.Time, interval time.Duration
 	// This creates data grouped by job (unsorted by time)
 	jobCount := 10
 	runsPerJob := count / jobCount
+	remainder := count % jobCount
+
 	if runsPerJob == 0 {
-		runsPerJob = 1
+		// For small counts, just create one run per job
 		jobCount = count
+		runsPerJob = 1
+		remainder = 0
 	}
 
-	for j := 0; j < jobCount && len(runs) < count; j++ {
+	runIndex := 0
+	for j := 0; j < jobCount && runIndex < count; j++ {
 		jobID := generateJobID(j)
-		for i := 0; i < runsPerJob && len(runs) < count; i++ {
+		// Give this job its base runs plus one extra if we have remainder
+		jobRuns := runsPerJob
+		if j < remainder {
+			jobRuns++
+		}
+
+		for i := 0; i < jobRuns && runIndex < count; i++ {
 			runs = append(runs, ScheduledRun{
 				JobID:       jobID,
 				ScheduledAt: startTime.Add(time.Duration(i) * interval),
 			})
+			runIndex++
 		}
 	}
 
