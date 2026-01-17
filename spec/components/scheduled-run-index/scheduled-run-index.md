@@ -43,7 +43,9 @@ Therefore: **Rebuild the entire index periodically rather than incremental updat
 ### Bulk Rebuild Strategy
 ```
 Every scheduler loop iteration (e.g., every 30 seconds):
-1. Calculate next N hours of runs for all jobs (using cron parser)
+1. Calculate runs in range (now - gracePeriod, now + lookahead)
+   - gracePeriod: catch jobs scheduled just before now (e.g., 5-10 seconds)
+   - lookahead: typically 1 hour
 2. Collect results (grouped by job, unsorted)
 3. Sort all runs by (ScheduledAt, JobID) - O(n log n)
 4. Build new index (just assign sorted slice)
@@ -54,6 +56,7 @@ Every scheduler loop iteration (e.g., every 30 seconds):
 ### Why This Works
 - Cron calculation is fast: O(jobs × minutes_lookahead)
 - For 10,000 jobs × 60 minutes = ~5ms from benchmarks
+- Grace period ensures we don't miss jobs scheduled just before "now"
 - Sorting is fast: O(n log n), ~50-100ms for 1M items in Go
 - Building sorted slice is O(n) copy: extremely fast
 - Total rebuild time acceptable: ~60-110ms for worst case (1M runs)
@@ -282,18 +285,20 @@ Simple and robust!
 ### Usage Pattern
 ```go
 type Scheduler struct {
-    index     *ScheduledRunIndex
-    jobs      []Job
-    lookahead time.Duration // e.g., 1 hour
+    index       *ScheduledRunIndex
+    jobs        []Job
+    lookahead   time.Duration // e.g., 1 hour
+    gracePeriod time.Duration // e.g., 5-10 seconds
 }
 
 // Rebuild index periodically
 func (s *Scheduler) rebuildIndex() {
     now := time.Now()
+    start := now.Add(-s.gracePeriod) // Include recent past
     end := now.Add(s.lookahead)
 
-    // Generate all scheduled runs (fast!)
-    runs := GenerateScheduledRuns(s.jobs, now, end)
+    // Generate all scheduled runs in (now - grace, now + lookahead)
+    runs := GenerateScheduledRuns(s.jobs, start, end)
 
     // Swap atomically (instant!)
     s.index.Swap(runs)
@@ -334,7 +339,8 @@ func (s *Scheduler) loop() {
 3. **Deleted jobs**: Not included in next rebuild
 4. **Clock adjustments**: Rebuild handles naturally
 5. **Empty index**: Query returns empty slice
-6. **Past times**: Filtered out during generation
+6. **Grace period**: Index includes (now - grace, now + lookahead) to catch recently-passed runs
+7. **Past times**: Very old times naturally expire from index on next rebuild
 
 ### Rebuild Frequency Trade-offs
 - **More frequent** (10s): Lower memory, fresher data, more CPU
@@ -393,7 +399,8 @@ lib/scheduler/index/
 ## Open Questions
 1. **Rebuild frequency**: 30s? 60s? Configurable? (Start with 30s)
 2. **Lookahead window**: 1 hour? 2 hours? (Start with 1 hour)
-3. **Pre-allocate result slice**: Worth it? (Benchmark will answer)
+3. **Grace period**: 5s? 10s? 30s? (Start with 10s - must be > query interval)
+4. **Pre-allocate result slice**: Worth it? (Benchmark will answer)
 
 ## Success Criteria
 - ✅ Build 10,000 runs in < 5ms (including sort)
