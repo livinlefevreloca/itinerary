@@ -28,13 +28,13 @@ Therefore: **Rebuild the entire index periodically rather than incremental updat
 ### Functional Requirements
 1. **Build**: Construct index from pre-sorted scheduled runs
 2. **Query**: Find all jobs that should run within a time window [start, end)
-3. **Peek**: Get the next job(s) scheduled to run (earliest time)
+3. **Len**: Get count of scheduled runs in index
 4. **Swap**: Atomically replace old index with new one (no locks during queries)
 
 ### Performance Requirements
 - Build from 1,000,000 runs (including sorting): O(n log n), target < 150ms
 - Query: O(log n + k) where k is number of results, target < 1ms
-- Peek: O(1), target < 1µs
+- Len: O(1), target < 1µs
 - Memory overhead: < 50 bytes per run
 - No lock contention on read path
 
@@ -92,9 +92,6 @@ func NewScheduledRunIndex(runs []ScheduledRun) *ScheduledRunIndex
 
 // Query finds all runs in time window [start, end)
 func (idx *ScheduledRunIndex) Query(start, end time.Time) []ScheduledRun
-
-// Peek returns the earliest scheduled run
-func (idx *ScheduledRunIndex) Peek() (*ScheduledRun, bool)
 
 // Len returns number of scheduled runs
 func (idx *ScheduledRunIndex) Len() int
@@ -156,19 +153,6 @@ func (idx *ScheduledRunIndex) Query(start, end time.Time) []ScheduledRun {
     }
 
     return results
-}
-```
-
-### Peek Implementation
-```go
-func (idx *ScheduledRunIndex) Peek() (*ScheduledRun, bool) {
-    runs := idx.runs.Load()
-    if runs == nil || len(*runs) == 0 {
-        return nil, false
-    }
-
-    // First element is always earliest (slice is sorted)
-    return &(*runs)[0], true
 }
 ```
 
@@ -235,7 +219,7 @@ func sortRuns(runs []ScheduledRun) {
 Since there are no mutations, there are no errors:
 - Build always succeeds (or panics if out of memory)
 - Query always succeeds (may return empty)
-- Peek always succeeds (may return false)
+- Len always succeeds
 - Swap always succeeds
 
 Simple and robust!
@@ -248,7 +232,7 @@ Simple and robust!
 3. **Query exact boundaries**: Start/end time edge cases
 4. **Query with no results**: Empty time window
 5. **Query with all results**: Large time window
-6. **Peek**: First element, empty index
+6. **Len operations**: Empty index, after build, consistency
 7. **Multiple jobs at same time**: Stable ordering
 8. **Concurrent reads**: Race detector, multiple goroutines querying
 9. **Concurrent rebuild**: Swap while queries in progress
@@ -266,11 +250,6 @@ Simple and robust!
 - Various result sizes (10, 100, 1000, 10000 results)
 - Test with different index sizes (1000, 10000, 100000, 1000000 runs)
 - Verify O(log n + k) performance
-
-#### Peek Performance
-- Constant time access to first element
-- Test with various index sizes (up to 1M runs)
-- Should be O(1) regardless of size
 
 #### Realistic Workload
 - Simulate scheduler loop:
@@ -354,24 +333,23 @@ func (s *Scheduler) loop() {
 - Build 100,000 runs: < 30ms (sorting dominates)
 - Build 1,000,000 runs: < 150ms (sorting ~100ms + operations)
 - Query 100 runs: < 1ms (even with 1M runs in index)
-- Peek: < 1µs
+- Len: < 1µs (simple slice length)
 - Memory per run: ~40 bytes (jobID string + time.Time)
 - Total memory for 1M runs: < 100MB
 
 ### Expected Characteristics
 - Build: O(n log n) - sorting dominates
 - Query: O(log n + k) - binary search + linear scan
-- Peek: O(1) - array index
+- Len: O(1) - slice length
 - Memory: O(n) - proportional to runs
 
 ## Future Optimizations
 
 ### If Needed (Only if benchmarks show issues)
 1. **Pre-allocated queries**: Reuse result slices
-2. **Separate peek cache**: Cache first N items
-3. **Parallel rebuild**: Generate runs in parallel per job
-4. **Incremental rebuild**: Only recalculate changed jobs
-5. **Custom binary search**: Skip sort.Search overhead
+2. **Parallel rebuild**: Generate runs in parallel per job
+3. **Incremental rebuild**: Only recalculate changed jobs
+4. **Custom binary search**: Skip sort.Search overhead
 
 ### NOT Needed
 - Incremental updates (rebuild is fast enough)

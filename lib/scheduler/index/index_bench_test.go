@@ -300,52 +300,6 @@ func BenchmarkQuery_FullScan_1000000(b *testing.B) {
 	}
 }
 
-// Peek Benchmarks
-
-func BenchmarkPeek_1000(b *testing.B) {
-	now := time.Now()
-	runs := generateUnsortedRuns(1000, now, time.Second)
-	idx := NewScheduledRunIndex(runs)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = idx.Peek()
-	}
-}
-
-func BenchmarkPeek_10000(b *testing.B) {
-	now := time.Now()
-	runs := generateUnsortedRuns(10000, now, time.Second)
-	idx := NewScheduledRunIndex(runs)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = idx.Peek()
-	}
-}
-
-func BenchmarkPeek_100000(b *testing.B) {
-	now := time.Now()
-	runs := generateUnsortedRuns(100000, now, time.Second)
-	idx := NewScheduledRunIndex(runs)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = idx.Peek()
-	}
-}
-
-func BenchmarkPeek_1000000(b *testing.B) {
-	now := time.Now()
-	runs := generateUnsortedRuns(1000000, now, time.Second)
-	idx := NewScheduledRunIndex(runs)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = idx.Peek()
-	}
-}
-
 // Concurrent Benchmarks
 
 func BenchmarkConcurrentQuery_10Readers_100000Runs(b *testing.B) {

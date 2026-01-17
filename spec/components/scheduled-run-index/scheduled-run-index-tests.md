@@ -11,13 +11,12 @@ Comprehensive test suite for the Scheduled Run Index (sorted slice implementatio
 ```go
 TestBuild_Empty
 - Build index from empty slice
-- Query should return empty, Peek should return false
+- Query should return empty
 - Len should return 0
 
 TestBuild_SingleRun
 - Build index with one scheduled run
 - Query should find it
-- Peek should return it
 - Len should return 1
 
 TestBuild_MultipleRuns_SameTime
@@ -79,26 +78,6 @@ TestQuery_AllRuns
 TestQuery_NanosecondPrecision
 - Query with nanosecond-level time differences
 - Verify precise boundary handling
-```
-
-#### Peek Tests
-```go
-TestPeek_EmptyIndex
-- Peek on empty index
-- Should return nil, false
-
-TestPeek_SingleRun
-- Peek with one run
-- Should return that run
-
-TestPeek_MultipleRuns
-- Peek with many runs
-- Should return earliest run
-- If multiple at same time, should be deterministic (first by JobID)
-
-TestPeek_AfterQuery
-- Peek should still work after queries
-- Should return earliest remaining run
 ```
 
 #### Len Tests
@@ -270,19 +249,6 @@ BenchmarkQuery_FullScan_1000000
 // Should still be fast (sequential access)
 ```
 
-### Peek Benchmarks
-
-```go
-BenchmarkPeek_1000
-BenchmarkPeek_10000
-BenchmarkPeek_100000
-BenchmarkPeek_1000000
-
-// Should be O(1) regardless of size
-// Just array[0] access
-// Verify no degradation with size
-```
-
 ### Concurrent Benchmarks
 
 ```go
@@ -404,7 +370,7 @@ func assertTimesInRange(t *testing.T, runs []ScheduledRun, start, end time.Time)
 ### Benchmarks - Query Performance
 - ✅ Query with 1M runs, 1-hour window: < 1ms
 - ✅ Query scales with O(log n + k)
-- ✅ Peek with 1M runs: < 1µs
+- ✅ Len with 1M runs: < 1µs
 - ✅ Performance doesn't degrade unexpectedly
 
 ### Benchmarks - Concurrency

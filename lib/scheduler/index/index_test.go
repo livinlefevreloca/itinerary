@@ -65,11 +65,6 @@ func TestBuild_Empty(t *testing.T) {
 	if len(results) != 0 {
 		t.Errorf("expected empty query results, got %d", len(results))
 	}
-
-	run, ok := idx.Peek()
-	if ok {
-		t.Errorf("expected Peek()=false on empty index, got true with %+v", run)
-	}
 }
 
 func TestBuild_SingleRun(t *testing.T) {
@@ -82,14 +77,6 @@ func TestBuild_SingleRun(t *testing.T) {
 
 	if idx.Len() != 1 {
 		t.Errorf("expected Len()=1, got %d", idx.Len())
-	}
-
-	run, ok := idx.Peek()
-	if !ok {
-		t.Fatal("expected Peek()=true, got false")
-	}
-	if run.JobID != "job-001" || !run.ScheduledAt.Equal(now) {
-		t.Errorf("expected Peek()=%+v, got %+v", runs[0], *run)
 	}
 
 	results := idx.Query(now, now.Add(time.Second))
@@ -347,91 +334,6 @@ func TestQuery_NanosecondPrecision(t *testing.T) {
 	}
 }
 
-// Peek Tests
-
-func TestPeek_EmptyIndex(t *testing.T) {
-	idx := NewScheduledRunIndex([]ScheduledRun{})
-
-	run, ok := idx.Peek()
-	if ok {
-		t.Errorf("expected Peek()=false on empty index, got true with %+v", run)
-	}
-}
-
-func TestPeek_SingleRun(t *testing.T) {
-	now := time.Now()
-	runs := []ScheduledRun{
-		{JobID: "job-001", ScheduledAt: now},
-	}
-
-	idx := NewScheduledRunIndex(runs)
-
-	run, ok := idx.Peek()
-	if !ok {
-		t.Fatal("expected Peek()=true, got false")
-	}
-	if run.JobID != "job-001" {
-		t.Errorf("expected job-001, got %s", run.JobID)
-	}
-}
-
-func TestPeek_MultipleRuns(t *testing.T) {
-	now := time.Now()
-	runs := []ScheduledRun{
-		{JobID: "job-003", ScheduledAt: now.Add(time.Hour)},
-		{JobID: "job-001", ScheduledAt: now},
-		{JobID: "job-002", ScheduledAt: now.Add(time.Minute)},
-	}
-
-	idx := NewScheduledRunIndex(runs)
-
-	run, ok := idx.Peek()
-	if !ok {
-		t.Fatal("expected Peek()=true, got false")
-	}
-	if run.JobID != "job-001" {
-		t.Errorf("expected earliest run (job-001), got %s", run.JobID)
-	}
-}
-
-func TestPeek_MultipleRuns_SameTime(t *testing.T) {
-	now := time.Now()
-	runs := []ScheduledRun{
-		{JobID: "job-003", ScheduledAt: now},
-		{JobID: "job-001", ScheduledAt: now},
-		{JobID: "job-002", ScheduledAt: now},
-	}
-
-	idx := NewScheduledRunIndex(runs)
-
-	run, ok := idx.Peek()
-	if !ok {
-		t.Fatal("expected Peek()=true, got false")
-	}
-	// Should be first by JobID when times are equal
-	if run.JobID != "job-001" {
-		t.Errorf("expected job-001 (first by JobID), got %s", run.JobID)
-	}
-}
-
-func TestPeek_AfterQuery(t *testing.T) {
-	now := time.Now()
-	runs := generateUnsortedRuns(100, now, time.Second)
-
-	idx := NewScheduledRunIndex(runs)
-
-	// Query shouldn't affect Peek
-	_ = idx.Query(now.Add(time.Minute), now.Add(2*time.Minute))
-
-	run, ok := idx.Peek()
-	if !ok {
-		t.Fatal("expected Peek()=true after Query, got false")
-	}
-	if !run.ScheduledAt.Equal(now) && !run.ScheduledAt.Before(now.Add(time.Second)) {
-		t.Errorf("expected earliest run around %v, got %v", now, run.ScheduledAt)
-	}
-}
-
 // Len Tests
 
 func TestLen_EmptyIndex(t *testing.T) {
@@ -619,7 +521,6 @@ func TestConcurrency_ReadWhileSwap(t *testing.T) {
 					return
 				default:
 					_ = idx.Query(now, now.Add(time.Minute))
-					_, _ = idx.Peek()
 					_ = idx.Len()
 				}
 			}
