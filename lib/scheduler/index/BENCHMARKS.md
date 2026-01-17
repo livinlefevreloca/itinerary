@@ -11,46 +11,39 @@
 
 ## Overview
 
-The Scheduled Run Index uses a sorted slice with atomic pointer swapping for lock-free concurrent reads. This benchmark suite validates performance at scale from 10 to 1,000,000 scheduled runs.
+The Scheduled Run Index uses a sorted slice with atomic pointer swapping for lock-free concurrent reads. This benchmark suite measures performance at scale from 10 to 1,000,000 scheduled runs.
 
 ## Build Performance
 
 Building the index involves copying the input slice, sorting by (ScheduledAt, JobID), and storing via atomic pointer.
 
-| Runs | Time/op | Memory | Allocs | Target | Status |
-|------|---------|--------|--------|--------|--------|
-| 10 | 240 ns | 568 B | 6 | - | ✓ |
-| 100 | 7.0 µs | 4.2 KB | 6 | - | ✓ |
-| 1,000 | 111 µs | 40 KB | 6 | < 1 ms | ✓ |
-| 10,000 | 1.5 ms | 392 KB | 6 | < 5 ms | ✓ |
-| 100,000 | 17 ms | 3.9 MB | 6 | < 30 ms | ✓ |
-| 1,000,000 | 196 ms | 38 MB | 6 | < 150 ms | ~ |
+| Runs | Time/op | Memory | Allocs |
+|------|---------|--------|--------|
+| 10 | 240 ns | 568 B | 6 |
+| 100 | 7.0 µs | 4.2 KB | 6 |
+| 1,000 | 111 µs | 40 KB | 6 |
+| 10,000 | 1.5 ms | 392 KB | 6 |
+| 100,000 | 17 ms | 3.9 MB | 6 |
+| 1,000,000 | 196 ms | 38 MB | 6 |
 
-**Notes**:
-- Build time is O(n log n) dominated by sorting
-- 1M runs slightly exceeds 150ms target but still acceptable for periodic rebuilds
-- Memory usage is ~40 bytes per run as expected
-- Only 6 allocations regardless of size (excellent!)
+Build time is O(n log n), dominated by sorting. Memory usage is ~40 bytes per run. 6 allocations regardless of size.
 
 ## Query Performance - Small Window (1 Minute)
 
 Binary search to find start position, then linear scan for matching runs.
 
-| Index Size | Time/op | Memory | Allocs | Notes |
-|------------|---------|--------|--------|-------|
-| 1,000 | 21 ns | 0 B | 0 | O(log n) binary search |
-| 10,000 | 30 ns | 0 B | 0 | Scales logarithmically |
-| 100,000 | 36 ns | 0 B | 0 | Minimal degradation |
-| 1,000,000 | 42 ns | 0 B | 0 | Excellent at scale |
+| Index Size | Time/op | Memory | Allocs |
+|------------|---------|--------|--------|
+| 1,000 | 21 ns | 0 B | 0 |
+| 10,000 | 30 ns | 0 B | 0 |
+| 100,000 | 36 ns | 0 B | 0 |
+| 1,000,000 | 42 ns | 0 B | 0 |
 
-**Analysis**:
-- Query time increases logarithmically with index size (20 comparisons for 1M)
-- Zero allocations when no results found
-- Under 50ns even for 1M runs - exceptional performance
+Query time increases logarithmically with index size (~20 comparisons for 1M). Zero allocations when no results found.
 
 ## Query Performance - Medium Window (1 Hour)
 
-Typical scheduler workload - query for runs in the next hour.
+Query for runs in a 1-hour window.
 
 | Index Size | Time/op | Memory | Allocs | Results |
 |------------|---------|--------|--------|---------|
@@ -59,14 +52,9 @@ Typical scheduler workload - query for runs in the next hour.
 | 100,000 | 1.8 ms | 6.8 MB | 24 | ~3600 runs |
 | 1,000,000 | 1.1 ms | 6.8 MB | 24 | ~3600 runs |
 
-**Analysis**:
-- Time dominated by result collection (O(k) where k = result count)
-- 1M run query in 1.1ms meets < 1ms target (very close)
-- Memory scales with result count, not index size
+Time dominated by result collection (O(k) where k = result count). Memory scales with result count, not index size.
 
 ## Query Performance - Large Window (1 Day)
-
-Testing behavior with larger time windows.
 
 | Index Size | Time/op | Memory | Allocs | Results |
 |------------|---------|--------|--------|---------|
@@ -75,13 +63,11 @@ Testing behavior with larger time windows.
 | 100,000 | 578 µs | 2.4 MB | 20 | ~14400 runs |
 | 1,000,000 | 360 µs | 2.4 MB | 20 | ~14400 runs |
 
-**Analysis**:
-- Performance depends on result count, not index size
-- With sparse results, 1M index outperforms 100K index
+Performance depends on result count, not index size.
 
 ## Query Performance - Full Scan
 
-Worst case: returning all runs in the index.
+Returning all runs in the index.
 
 | Index Size | Time/op | Memory | Allocs |
 |------------|---------|--------|--------|
@@ -90,10 +76,7 @@ Worst case: returning all runs in the index.
 | 100,000 | 8.1 ms | 22 MB | 29 |
 | 1,000,000 | 43 ms | 215 MB | 39 |
 
-**Analysis**:
-- O(n) as expected when returning all results
-- Still fast due to sequential memory access
-- Memory proportional to result count
+O(n) when returning all results. Memory proportional to result count.
 
 ## Concurrent Query Performance
 
@@ -106,27 +89,19 @@ Multiple goroutines querying simultaneously using atomic.Pointer.Load().
 | 10 | 1,000,000 | 8.2 ns | 0 B | 0 |
 | 100 | 1,000,000 | 8.7 ns | 0 B | 0 |
 
-**Analysis**:
-- Lock-free reads via atomic.Pointer - no contention
-- Scales linearly with number of readers
-- 100 concurrent readers on 1M index: 8.7ns per query
-- Zero allocations
+Lock-free reads via atomic.Pointer. Zero allocations.
 
 ## Realistic Workload
 
-Simulates actual scheduler behavior: 10,000 jobs with varying schedules (every minute, 5min, 15min, hourly, daily).
+Simulates scheduler behavior: 10,000 jobs with varying schedules (every minute, 5min, 15min, hourly, daily).
 
 - **Time/op**: 64 ns
 - **Memory**: 22 B/op
 - **Allocs**: 0
 
-**Analysis**:
-- Queries on realistic mixed-schedule workload are extremely fast
-- Under 100ns for typical scheduler query patterns
-
 ## Swap Performance
 
-Atomically replacing the index with new data (typical rebuild operation).
+Atomically replacing the index with new data.
 
 | Runs | Time/op | Memory | Allocs |
 |------|---------|--------|--------|
@@ -135,10 +110,7 @@ Atomically replacing the index with new data (typical rebuild operation).
 | 100,000 | 17 ms | 3.9 MB | 5 |
 | 1,000,000 | 193 ms | 38 MB | 5 |
 
-**Analysis**:
-- Swap includes copy + sort + atomic store
-- Performance identical to Build (as expected)
-- 5 allocations (one less than Build which also creates the struct)
+Swap includes copy + sort + atomic store. 5 allocations (one less than Build which also creates the struct).
 
 ## Swap with Concurrent Reads
 
@@ -149,14 +121,9 @@ Swapping index while 10 readers continuously query.
 - **Memory**: 3.9 MB
 - **Allocs**: 5
 
-**Analysis**:
-- Readers continue using old index during swap
-- No blocking, no race conditions
-- Old index GC'd when all readers finish
+Readers continue using old index during swap. Old index GC'd when all readers finish.
 
 ## Memory Benchmarks
-
-Detailed memory allocation tracking.
 
 ### Build Memory
 
@@ -167,7 +134,7 @@ Detailed memory allocation tracking.
 | 100,000 | 4,006,040 | 6 |
 | 1,000,000 | 40,001,700 | 6 |
 
-**Memory per run**: ~40 bytes (jobID string + time.Time + overhead)
+Memory per run: ~40 bytes (jobID string + time.Time + overhead)
 
 ### Query Memory
 
@@ -178,32 +145,7 @@ Detailed memory allocation tracking.
 | 100,000 | 0 | 0 |
 | 1,000,000 | 0 | 0 |
 
-**Analysis**:
-- Zero allocations for queries with no results
-- Allocations only occur when creating result slice
-
-## Performance Summary
-
-### Meets All Targets
-
-✅ Build 10,000 runs: 1.5ms < 5ms
-✅ Build 100,000 runs: 17ms < 30ms
-✅ Query 1M runs (1-hour window): 1.1ms ≈ 1ms
-✅ Concurrent queries: 7-9ns, no lock contention
-✅ Memory: ~40 bytes/run, 38MB for 1M runs < 100MB
-
-### Slightly Over Target
-
-~ Build 1,000,000 runs: 196ms (target: 150ms)
-- Still acceptable for periodic rebuilds (every 30-60s)
-- Rebuild is background operation, doesn't block queries
-
-### Exceptional Performance
-
-⭐ Query 1M index: 42ns (O(log n) = ~20 comparisons)
-⭐ Zero allocations for empty queries
-⭐ Only 6 allocations for build regardless of size
-⭐ Perfect concurrent scaling (lock-free reads)
+Zero allocations for queries with no results. Allocations only occur when creating result slice.
 
 ## Complexity Analysis
 
@@ -217,20 +159,3 @@ Detailed memory allocation tracking.
 Where:
 - n = number of runs in index
 - k = number of results returned
-
-## Conclusion
-
-The sorted slice implementation with atomic pointer swapping provides:
-
-1. **Excellent query performance**: Sub-microsecond queries even with 1M runs
-2. **Lock-free concurrency**: Perfect scaling with concurrent readers
-3. **Predictable memory**: ~40 bytes per run, no memory leaks
-4. **Simple implementation**: No external dependencies, easy to understand
-5. **Production-ready**: Meets or exceeds all performance targets
-
-The slightly higher build time for 1M runs (196ms vs 150ms target) is acceptable because:
-- Rebuilds happen in background every 30-60 seconds
-- Rebuilds don't block queries (atomic swap)
-- Real-world workloads typically have 10K-100K runs (well under target)
-
-**Recommendation**: Deploy as-is. Performance is excellent for production use.
