@@ -50,7 +50,7 @@ type SchedulerConfig struct {
 
     // Orchestrator heartbeat configuration
     OrchestratorHeartbeatInterval time.Duration // Default: 10 seconds (how often orchestrators send heartbeats)
-    MaxMissedHeartbeats           int           // Default: 5 (mark as orphaned after this many missed)
+    MaxMissedOrchestratorHeartbeats           int           // Default: 3 (mark as orphaned after this many missed)
 }
 ```
 
@@ -71,7 +71,7 @@ func DefaultSchedulerConfig() SchedulerConfig {
         InboxBufferSize:               10000,
         InboxSendTimeout:              5 * time.Second,
         OrchestratorHeartbeatInterval: 10 * time.Second,
-        MaxMissedHeartbeats:           5,
+        MaxMissedOrchestratorHeartbeats:           3,
     }
 }
 
@@ -490,9 +490,23 @@ type OrchestratorState struct {
 type OrchestratorStatus int
 
 const (
+    // Pre-execution states
     OrchestratorPreRun OrchestratorStatus = iota // Created, waiting for start time
-    OrchestratorPending                          // Pre-execution checks
+    OrchestratorPending                          // Initial pre-execution phase
+    OrchestratorConditionPending                 // About to check pre-execution requirements
+    OrchestratorConditionRunning                 // Checking pre-execution requirements
+    OrchestratorActionPending                    // Requirement failed, about to take action
+    OrchestratorActionRunning                    // Taking action based on requirement outcome
+
+    // Execution states
+    OrchestratorContainerCreating                // Creating Kubernetes pod/container
     OrchestratorRunning                          // Job executing
+    OrchestratorTerminating                      // Job finishing/cleanup
+
+    // Retry state
+    OrchestratorRetrying                         // After failure, before retry
+
+    // Terminal states
     OrchestratorCompleted                        // Completed successfully
     OrchestratorFailed                           // Failed
     OrchestratorCancelled                        // Cancelled
@@ -505,8 +519,22 @@ func (s OrchestratorStatus) String() string {
         return "prerun"
     case OrchestratorPending:
         return "pending"
+    case OrchestratorConditionPending:
+        return "condition_pending"
+    case OrchestratorConditionRunning:
+        return "condition_running"
+    case OrchestratorActionPending:
+        return "action_pending"
+    case OrchestratorActionRunning:
+        return "action_running"
+    case OrchestratorContainerCreating:
+        return "container_creating"
     case OrchestratorRunning:
         return "running"
+    case OrchestratorTerminating:
+        return "terminating"
+    case OrchestratorRetrying:
+        return "retrying"
     case OrchestratorCompleted:
         return "completed"
     case OrchestratorFailed:
@@ -520,6 +548,37 @@ func (s OrchestratorStatus) String() string {
     }
 }
 ```
+
+### Orchestrator Lifecycle
+
+The orchestrator progresses through the following state transitions:
+
+#### Normal Flow
+1. **PreRun**: Waiting for scheduled time to arrive
+2. **Pending**: Scheduled time reached, starting pre-execution phase
+3. **ConditionPending**: About to check pre-execution requirements
+4. **ConditionRunning**: Actively checking pre-execution requirements
+5. **ActionPending**: Pre-execution requirement failed, about to take action
+6. **ActionRunning**: Taking action based on failed requirement
+7. **ContainerCreating**: Creating Kubernetes pod/container for job execution
+8. **Running**: Job is actively executing
+9. **Terminating**: Job finishing, performing cleanup
+10. **Completed**: Job finished successfully (terminal)
+
+#### Failure Flow
+- From any non-terminal state → **Failed** (terminal)
+- From **Failed** → **Retrying** (before attempting retry)
+- From **Retrying** → back to **Pending** (retry attempt)
+
+#### Cancellation Flow
+- From any non-terminal state → **Cancelled** (terminal)
+
+#### Orphaning Flow
+- From any non-terminal state → **Orphaned** (terminal, no heartbeats received)
+
+#### State Categories
+- **Non-terminal states** (receive heartbeat monitoring): PreRun, Pending, ConditionPending, ConditionRunning, ActionPending, ActionRunning, ContainerCreating, Running, Terminating, Retrying
+- **Terminal states** (eligible for cleanup after grace period): Completed, Failed, Cancelled, Orphaned
 
 ### Inbox Messages
 ```go
@@ -1229,10 +1288,12 @@ func (s *Scheduler) handleGetStats(msg InboxMessage) {
 ```go
 func (s *Scheduler) checkHeartbeats(now time.Time) {
     for runID, state := range s.activeOrchestrators {
-        // Only check heartbeats for active orchestrators
-        if state.Status != OrchestratorPreRun &&
-           state.Status != OrchestratorPending &&
-           state.Status != OrchestratorRunning {
+        // Only check heartbeats for non-terminal states
+        // Skip terminal states: Completed, Failed, Cancelled, Orphaned
+        if state.Status == OrchestratorCompleted ||
+           state.Status == OrchestratorFailed ||
+           state.Status == OrchestratorCancelled ||
+           state.Status == OrchestratorOrphaned {
             continue
         }
 
@@ -1251,7 +1312,7 @@ func (s *Scheduler) checkHeartbeats(now time.Time) {
                 "time_since_last", timeSinceLastHeartbeat)
 
             // Check if we should mark as orphaned
-            if state.MissedHeartbeats >= s.config.MaxMissedHeartbeats {
+            if state.MissedHeartbeats >= s.config.MaxMissedOrchestratorHeartbeats {
                 s.logger.Error("marking orchestrator as orphaned",
                     "run_id", runID,
                     "job_id", state.JobID,
@@ -1282,7 +1343,7 @@ func (s *Scheduler) cleanupOrchestrators(now time.Time) {
     toDelete := []string{}
 
     for runID, state := range s.activeOrchestrators {
-        // Only clean up completed orchestrators
+        // Only clean up terminal state orchestrators
         if state.Status != OrchestratorCompleted &&
            state.Status != OrchestratorFailed &&
            state.Status != OrchestratorCancelled &&
@@ -1523,7 +1584,7 @@ Will be defined in `scheduler-tests.md` but key areas:
 4. **Job definition reloading**: Index builder goroutine queries DB on `IndexRebuildInterval` cadence
 5. **Stats aggregation**: Recorded per-iteration, buffered, synced on `STATS_PERIOD`
 6. **Inbox overflow**: Senders block with timeout. Timeouts logged and tracked in stats. Inbox depth is configurable with large default (10,000).
-7. **Orchestrator monitoring**: Heartbeats sent on `OrchestratorHeartbeatInterval`. Orchestrators marked as orphaned after `MaxMissedHeartbeats` consecutive misses.
+7. **Orchestrator monitoring**: Heartbeats sent on `OrchestratorHeartbeatInterval`. Orchestrators marked as orphaned after `MaxMissedOrchestratorHeartbeats` consecutive misses.
 
 ## Future Enhancements
 
