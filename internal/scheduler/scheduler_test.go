@@ -8,8 +8,12 @@ import (
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
+// =============================================================================
 // RunID Generation Tests
+// =============================================================================
 
+// TestGenerateRunID_Deterministic verifies that runID generation is deterministic for deduplication.
+// This is critical: same job+time must always produce the same runID to prevent duplicate runs.
 func TestGenerateRunID_Deterministic(t *testing.T) {
 	jobID := "job123"
 	scheduledAt := time.Unix(1704067200, 0) // 2024-01-01 00:00:00 UTC
@@ -27,6 +31,7 @@ func TestGenerateRunID_Deterministic(t *testing.T) {
 	}
 }
 
+// TestGenerateRunID_DifferentJobs verifies that different jobIDs produce different runIDs.
 func TestGenerateRunID_DifferentJobs(t *testing.T) {
 	scheduledAt := time.Unix(1704067200, 0)
 
@@ -46,6 +51,7 @@ func TestGenerateRunID_DifferentJobs(t *testing.T) {
 	}
 }
 
+// TestGenerateRunID_DifferentTimes verifies that the same job at different times produces different runIDs.
 func TestGenerateRunID_DifferentTimes(t *testing.T) {
 	jobID := "job1"
 
@@ -65,8 +71,11 @@ func TestGenerateRunID_DifferentTimes(t *testing.T) {
 	}
 }
 
+// =============================================================================
 // Initialization Tests
+// =============================================================================
 
+// TestNewScheduler_Success verifies that a new scheduler can be created successfully.
 func TestNewScheduler_Success(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	mockDB := testutil.NewMockDB()
@@ -104,6 +113,7 @@ func TestNewScheduler_Success(t *testing.T) {
 	}
 }
 
+// TestNewScheduler_DBQueryFails verifies that initialization fails gracefully when database query fails.
 func TestNewScheduler_DBQueryFails(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	mockDB := testutil.NewMockDB()
@@ -122,6 +132,7 @@ func TestNewScheduler_DBQueryFails(t *testing.T) {
 	}
 }
 
+// TestNewScheduler_InvalidCronSchedule verifies that invalid cron schedules are logged but don't prevent initialization.
 func TestNewScheduler_InvalidCronSchedule(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	mockDB := testutil.NewMockDB()
@@ -158,8 +169,11 @@ func TestNewScheduler_InvalidCronSchedule(t *testing.T) {
 	}
 }
 
+// =============================================================================
 // Message Processing Tests
+// =============================================================================
 
+// TestScheduler_HandleOrchestratorStateChange verifies that orchestrator state changes are processed correctly.
 func TestScheduler_HandleOrchestratorStateChange(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -201,6 +215,7 @@ func TestScheduler_HandleOrchestratorStateChange(t *testing.T) {
 	}
 }
 
+// TestScheduler_HandleOrchestratorComplete verifies that orchestrator completion messages update state and buffer database writes.
 func TestScheduler_HandleOrchestratorComplete(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -248,6 +263,7 @@ func TestScheduler_HandleOrchestratorComplete(t *testing.T) {
 	}
 }
 
+// TestScheduler_HandleCancelRun verifies that cancel messages close the orchestrator's cancel channel and update status.
 func TestScheduler_HandleCancelRun(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -290,6 +306,7 @@ func TestScheduler_HandleCancelRun(t *testing.T) {
 	}
 }
 
+// TestScheduler_HandleCancelRun_NonExistent verifies that cancelling non-existent runs logs a warning without panicking.
 func TestScheduler_HandleCancelRun_NonExistent(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -314,8 +331,11 @@ func TestScheduler_HandleCancelRun_NonExistent(t *testing.T) {
 	}
 }
 
+// =============================================================================
 // Heartbeat Monitoring Tests
+// =============================================================================
 
+// TestScheduler_CheckHeartbeats_NoMissed verifies that recent heartbeats don't increment the missed counter.
 func TestScheduler_CheckHeartbeats_NoMissed(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -350,6 +370,7 @@ func TestScheduler_CheckHeartbeats_NoMissed(t *testing.T) {
 	}
 }
 
+// TestScheduler_CheckHeartbeats_OneMissed verifies that stale heartbeats increment the missed counter and log warnings.
 func TestScheduler_CheckHeartbeats_OneMissed(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -389,11 +410,12 @@ func TestScheduler_CheckHeartbeats_OneMissed(t *testing.T) {
 	}
 }
 
+// TestScheduler_CheckHeartbeats_Orphaned verifies that orchestrators are marked orphaned after exceeding max missed heartbeats.
 func TestScheduler_CheckHeartbeats_Orphaned(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
 	config.OrchestratorHeartbeatInterval = 10 * time.Second
-	config.MaxMissedHeartbeats = 5
+	config.MaxMissedOrchestratorHeartbeats = 3
 	syncerConfig := DefaultSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
@@ -405,8 +427,8 @@ func TestScheduler_CheckHeartbeats_Orphaned(t *testing.T) {
 		RunID:            runID,
 		JobID:            "job1",
 		Status:           OrchestratorRunning,
-		LastHeartbeat:    now.Add(-60 * time.Second), // 60 seconds ago
-		MissedHeartbeats: 4,                          // One more will trigger orphan
+		LastHeartbeat:    now.Add(-40 * time.Second), // 40 seconds ago
+		MissedHeartbeats: 2,                          // One more will trigger orphan
 	}
 	scheduler.activeOrchestrators[runID] = state
 
@@ -414,8 +436,8 @@ func TestScheduler_CheckHeartbeats_Orphaned(t *testing.T) {
 	scheduler.checkHeartbeats(now)
 
 	// Should be marked as orphaned
-	if state.MissedHeartbeats != 5 {
-		t.Errorf("expected 5 missed heartbeats, got %d", state.MissedHeartbeats)
+	if state.MissedHeartbeats != 3 {
+		t.Errorf("expected 3 missed heartbeats, got %d", state.MissedHeartbeats)
 	}
 
 	if state.Status != OrchestratorOrphaned {
@@ -434,6 +456,7 @@ func TestScheduler_CheckHeartbeats_Orphaned(t *testing.T) {
 	}
 }
 
+// TestScheduler_CheckHeartbeats_SkipsCompleted verifies that completed orchestrators are excluded from heartbeat monitoring.
 func TestScheduler_CheckHeartbeats_SkipsCompleted(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -462,6 +485,47 @@ func TestScheduler_CheckHeartbeats_SkipsCompleted(t *testing.T) {
 	}
 }
 
+// TestScheduler_CheckHeartbeats_SkipsAllTerminalStates verifies that all terminal states are excluded from heartbeat monitoring.
+func TestScheduler_CheckHeartbeats_SkipsAllTerminalStates(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create orchestrators in all terminal states with very old heartbeats
+	now := time.Now()
+	terminalStates := []OrchestratorStatus{
+		OrchestratorCompleted,
+		OrchestratorFailed,
+		OrchestratorCancelled,
+		OrchestratorOrphaned,
+	}
+
+	for i, status := range terminalStates {
+		runID := fmt.Sprintf("job%d:1704067200", i)
+		scheduler.activeOrchestrators[runID] = &OrchestratorState{
+			RunID:            runID,
+			JobID:            fmt.Sprintf("job%d", i),
+			Status:           status,
+			LastHeartbeat:    now.Add(-1 * time.Hour), // Very old
+			MissedHeartbeats: 0,
+		}
+	}
+
+	// Check heartbeats
+	scheduler.checkHeartbeats(now)
+
+	// All terminal states should be skipped (no missed heartbeats incremented)
+	for runID, state := range scheduler.activeOrchestrators {
+		if state.MissedHeartbeats != 0 {
+			t.Errorf("terminal state orchestrator %s should not have heartbeat checked, but has %d missed",
+				runID, state.MissedHeartbeats)
+		}
+	}
+}
+
+// TestScheduler_HandleHeartbeat_ResetsCounter verifies that receiving a heartbeat resets the missed heartbeat counter.
 func TestScheduler_HandleHeartbeat_ResetsCounter(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -502,8 +566,11 @@ func TestScheduler_HandleHeartbeat_ResetsCounter(t *testing.T) {
 	}
 }
 
+// =============================================================================
 // Cleanup Tests
+// =============================================================================
 
+// TestScheduler_CleanupOrchestrators_NoCleanup verifies that orchestrators within grace period are not cleaned up.
 func TestScheduler_CleanupOrchestrators_NoCleanup(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -532,6 +599,7 @@ func TestScheduler_CleanupOrchestrators_NoCleanup(t *testing.T) {
 	}
 }
 
+// TestScheduler_CleanupOrchestrators_AfterGrace verifies that terminal orchestrators past grace period are removed.
 func TestScheduler_CleanupOrchestrators_AfterGrace(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -560,6 +628,7 @@ func TestScheduler_CleanupOrchestrators_AfterGrace(t *testing.T) {
 	}
 }
 
+// TestScheduler_CleanupOrchestrators_MultipleStates verifies that all terminal states are cleaned up after grace period.
 func TestScheduler_CleanupOrchestrators_MultipleStates(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -597,6 +666,7 @@ func TestScheduler_CleanupOrchestrators_MultipleStates(t *testing.T) {
 	}
 }
 
+// TestScheduler_CleanupOrchestrators_SkipsActive verifies that active orchestrators are never cleaned up regardless of age.
 func TestScheduler_CleanupOrchestrators_SkipsActive(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -605,17 +675,24 @@ func TestScheduler_CleanupOrchestrators_SkipsActive(t *testing.T) {
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
-	// Create active orchestrators, all past grace period
+	// Create non-terminal orchestrators, all past grace period
 	now := time.Now()
 	pastTime := now.Add(-40 * time.Second)
 
-	activeStates := []OrchestratorStatus{
+	nonTerminalStates := []OrchestratorStatus{
 		OrchestratorPreRun,
 		OrchestratorPending,
+		OrchestratorConditionPending,
+		OrchestratorConditionRunning,
+		OrchestratorActionPending,
+		OrchestratorActionRunning,
+		OrchestratorContainerCreating,
 		OrchestratorRunning,
+		OrchestratorTerminating,
+		OrchestratorRetrying,
 	}
 
-	for i, status := range activeStates {
+	for i, status := range nonTerminalStates {
 		runID := fmt.Sprintf("job%d:%d", i, pastTime.Unix())
 		scheduler.activeOrchestrators[runID] = &OrchestratorState{
 			RunID:       runID,
@@ -627,9 +704,10 @@ func TestScheduler_CleanupOrchestrators_SkipsActive(t *testing.T) {
 	// Cleanup
 	scheduler.cleanupOrchestrators(now)
 
-	// None should be removed (still active)
-	if len(scheduler.activeOrchestrators) != 3 {
-		t.Errorf("expected 3 active orchestrators to remain, got %d", len(scheduler.activeOrchestrators))
+	// None should be removed (all non-terminal)
+	if len(scheduler.activeOrchestrators) != len(nonTerminalStates) {
+		t.Errorf("expected %d non-terminal orchestrators to remain, got %d",
+			len(nonTerminalStates), len(scheduler.activeOrchestrators))
 	}
 }
 
