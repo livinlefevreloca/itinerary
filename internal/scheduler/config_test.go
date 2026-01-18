@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+// =============================================================================
+// Default Configuration Tests
+// =============================================================================
+
+// TestDefaultSchedulerConfig verifies that default scheduler configuration has positive values and passes validation.
 func TestDefaultSchedulerConfig(t *testing.T) {
 	config := DefaultSchedulerConfig()
 
@@ -33,8 +38,13 @@ func TestDefaultSchedulerConfig(t *testing.T) {
 	if config.OrchestratorHeartbeatInterval <= 0 {
 		t.Error("OrchestratorHeartbeatInterval must be positive")
 	}
-	if config.MaxMissedHeartbeats <= 0 {
-		t.Error("MaxMissedHeartbeats must be positive")
+	if config.MaxMissedOrchestratorHeartbeats <= 0 {
+		t.Error("MaxMissedOrchestratorHeartbeats must be positive")
+	}
+
+	// Verify IndexRebuildInterval < LookaheadWindow (required constraint)
+	if config.IndexRebuildInterval >= config.LookaheadWindow {
+		t.Error("IndexRebuildInterval must be less than LookaheadWindow")
 	}
 
 	// Verify defaults pass validation
@@ -44,6 +54,7 @@ func TestDefaultSchedulerConfig(t *testing.T) {
 	}
 }
 
+// TestDefaultSyncerConfig verifies that default syncer configuration has positive values and passes validation.
 func TestDefaultSyncerConfig(t *testing.T) {
 	config := DefaultSyncerConfig()
 
@@ -77,6 +88,11 @@ func TestDefaultSyncerConfig(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Configuration Validation Tests
+// =============================================================================
+
+// TestValidateConfig_IndexRebuildInterval_TooLarge verifies that validation fails when IndexRebuildInterval >= LookaheadWindow.
 func TestValidateConfig_IndexRebuildInterval_TooLarge(t *testing.T) {
 	config := DefaultSchedulerConfig()
 	config.IndexRebuildInterval = 15 * time.Minute
@@ -88,6 +104,7 @@ func TestValidateConfig_IndexRebuildInterval_TooLarge(t *testing.T) {
 	}
 }
 
+// TestValidateConfig_NegativePreScheduleInterval verifies that validation fails for negative PreScheduleInterval.
 func TestValidateConfig_NegativePreScheduleInterval(t *testing.T) {
 	config := DefaultSchedulerConfig()
 	config.PreScheduleInterval = -1 * time.Second
@@ -98,6 +115,7 @@ func TestValidateConfig_NegativePreScheduleInterval(t *testing.T) {
 	}
 }
 
+// TestValidateConfig_NegativeLookaheadWindow verifies that validation fails for negative LookaheadWindow.
 func TestValidateConfig_NegativeLookaheadWindow(t *testing.T) {
 	config := DefaultSchedulerConfig()
 	config.LookaheadWindow = -1 * time.Minute
@@ -108,6 +126,7 @@ func TestValidateConfig_NegativeLookaheadWindow(t *testing.T) {
 	}
 }
 
+// TestValidateConfig_NegativeGracePeriod verifies that validation fails for negative GracePeriod.
 func TestValidateConfig_NegativeGracePeriod(t *testing.T) {
 	config := DefaultSchedulerConfig()
 	config.GracePeriod = -1 * time.Second
@@ -118,6 +137,7 @@ func TestValidateConfig_NegativeGracePeriod(t *testing.T) {
 	}
 }
 
+// TestValidateConfig_ZeroInboxBufferSize verifies that validation fails for zero InboxBufferSize.
 func TestValidateConfig_ZeroInboxBufferSize(t *testing.T) {
 	config := DefaultSchedulerConfig()
 	config.InboxBufferSize = 0
@@ -128,6 +148,7 @@ func TestValidateConfig_ZeroInboxBufferSize(t *testing.T) {
 	}
 }
 
+// TestValidateConfig_NegativeOrchestratorHeartbeatInterval verifies that validation fails for negative OrchestratorHeartbeatInterval.
 func TestValidateConfig_NegativeOrchestratorHeartbeatInterval(t *testing.T) {
 	config := DefaultSchedulerConfig()
 	config.OrchestratorHeartbeatInterval = -1 * time.Second
@@ -138,16 +159,18 @@ func TestValidateConfig_NegativeOrchestratorHeartbeatInterval(t *testing.T) {
 	}
 }
 
-func TestValidateConfig_ZeroMaxMissedHeartbeats(t *testing.T) {
+// TestValidateConfig_ZeroMaxMissedOrchestratorHeartbeats verifies that validation fails for zero MaxMissedOrchestratorHeartbeats.
+func TestValidateConfig_ZeroMaxMissedOrchestratorHeartbeats(t *testing.T) {
 	config := DefaultSchedulerConfig()
-	config.MaxMissedHeartbeats = 0
+	config.MaxMissedOrchestratorHeartbeats = 0
 
 	err := validateConfig(config)
 	if err == nil {
-		t.Error("expected error for zero MaxMissedHeartbeats")
+		t.Error("expected error for zero MaxMissedOrchestratorHeartbeats")
 	}
 }
 
+// TestValidateSyncerConfig_ZeroMaxBufferedJobRunUpdates verifies that validation fails for zero MaxBufferedJobRunUpdates.
 func TestValidateSyncerConfig_ZeroMaxBufferedJobRunUpdates(t *testing.T) {
 	config := DefaultSyncerConfig()
 	config.MaxBufferedJobRunUpdates = 0

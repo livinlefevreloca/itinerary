@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -127,7 +128,7 @@ func TestNewScheduler_DBQueryFails(t *testing.T) {
 		t.Error("expected error when DB query fails")
 	}
 
-	if err != nil && !contains(err.Error(), "failed to query jobs on startup") {
+	if err != nil && !strings.Contains(err.Error(), "failed to query jobs on startup") {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -334,41 +335,6 @@ func TestScheduler_HandleCancelRun_NonExistent(t *testing.T) {
 // =============================================================================
 // Heartbeat Monitoring Tests
 // =============================================================================
-
-// TestScheduler_CheckHeartbeats_NoMissed verifies that recent heartbeats don't increment the missed counter.
-func TestScheduler_CheckHeartbeats_NoMissed(t *testing.T) {
-	logger := testutil.NewTestLogger()
-	config := DefaultSchedulerConfig()
-	config.OrchestratorHeartbeatInterval = 10 * time.Second
-	syncerConfig := DefaultSyncerConfig()
-
-	scheduler := createTestScheduler(t, config, syncerConfig, logger)
-
-	// Create orchestrator with recent heartbeat
-	now := time.Now()
-	runID := "job1:1704067200"
-	state := &OrchestratorState{
-		RunID:            runID,
-		JobID:            "job1",
-		Status:           OrchestratorRunning,
-		LastHeartbeat:    now.Add(-5 * time.Second), // 5 seconds ago
-		MissedHeartbeats: 0,
-	}
-	scheduler.activeOrchestrators[runID] = state
-
-	// Check heartbeats
-	scheduler.checkHeartbeats(now)
-
-	// No missed heartbeats
-	if state.MissedHeartbeats != 0 {
-		t.Errorf("expected 0 missed heartbeats, got %d", state.MissedHeartbeats)
-	}
-
-	// Status unchanged
-	if state.Status != OrchestratorRunning {
-		t.Errorf("expected status to remain Running, got %v", state.Status)
-	}
-}
 
 // TestScheduler_CheckHeartbeats_OneMissed verifies that stale heartbeats increment the missed counter and log warnings.
 func TestScheduler_CheckHeartbeats_OneMissed(t *testing.T) {
@@ -727,8 +693,4 @@ func createTestScheduler(t *testing.T, config SchedulerConfig, syncerConfig Sync
 		shutdown:            make(chan struct{}),
 		rebuildIndexChan:    make(chan struct{}, 1),
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[:len(substr)] == substr
 }

@@ -7,6 +7,11 @@ import (
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
+// =============================================================================
+// Send Tests
+// =============================================================================
+
+// TestInbox_Send_Success verifies that messages can be sent to an inbox with available buffer space.
 func TestInbox_Send_Success(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	inbox := NewInbox(10, 100*time.Millisecond, logger)
@@ -37,6 +42,7 @@ func TestInbox_Send_Success(t *testing.T) {
 	}
 }
 
+// TestInbox_Send_Timeout verifies that Send returns false when the inbox buffer is full and times out.
 func TestInbox_Send_Timeout(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	inbox := NewInbox(2, 10*time.Millisecond, logger)
@@ -67,6 +73,11 @@ func TestInbox_Send_Timeout(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Receive Tests
+// =============================================================================
+
+// TestInbox_TryReceive_Success verifies that TryReceive returns messages when inbox contains them.
 func TestInbox_TryReceive_Success(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	inbox := NewInbox(10, 100*time.Millisecond, logger)
@@ -96,6 +107,7 @@ func TestInbox_TryReceive_Success(t *testing.T) {
 	}
 }
 
+// TestInbox_TryReceive_Empty verifies that TryReceive returns false when inbox is empty.
 func TestInbox_TryReceive_Empty(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	inbox := NewInbox(10, 100*time.Millisecond, logger)
@@ -110,6 +122,7 @@ func TestInbox_TryReceive_Empty(t *testing.T) {
 	}
 }
 
+// TestInbox_Receive_Blocking verifies that Receive blocks until a message is available.
 func TestInbox_Receive_Blocking(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	inbox := NewInbox(10, 100*time.Millisecond, logger)
@@ -121,11 +134,9 @@ func TestInbox_Receive_Blocking(t *testing.T) {
 		received <- msg
 	}()
 
-	// Give goroutine time to start
-	time.Sleep(10 * time.Millisecond)
-
-	// Send message after 50ms
+	// Give goroutine time to start and begin blocking
 	time.Sleep(50 * time.Millisecond)
+
 	sentMsg := InboxMessage{
 		Type: MsgShutdown,
 	}
@@ -142,6 +153,11 @@ func TestInbox_Receive_Blocking(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Statistics Tests
+// =============================================================================
+
+// TestInbox_UpdateDepthStats verifies that inbox depth statistics track current and maximum depths correctly.
 func TestInbox_UpdateDepthStats(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	inbox := NewInbox(10, 100*time.Millisecond, logger)
@@ -190,15 +206,38 @@ func TestInbox_UpdateDepthStats(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Concurrency Tests
+// =============================================================================
+
+// TestInbox_ConcurrentSendReceive verifies that inbox handles concurrent sends and receives correctly.
 func TestInbox_ConcurrentSendReceive(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	inbox := NewInbox(100, 100*time.Millisecond, logger)
 
 	const numSenders = 5
 	const numMessages = 20
-	done := make(chan bool)
+	expectedMessages := numSenders * numMessages
 
-	// Start senders
+	sendDone := make(chan bool)
+	receiveDone := make(chan int)
+
+	// Start concurrent receiver
+	go func() {
+		receivedCount := 0
+		for receivedCount < expectedMessages {
+			_, ok := inbox.TryReceive()
+			if ok {
+				receivedCount++
+			} else {
+				// Brief sleep if no messages available
+				time.Sleep(1 * time.Millisecond)
+			}
+		}
+		receiveDone <- receivedCount
+	}()
+
+	// Start concurrent senders
 	for i := 0; i < numSenders; i++ {
 		go func(id int) {
 			for j := 0; j < numMessages; j++ {
@@ -207,26 +246,17 @@ func TestInbox_ConcurrentSendReceive(t *testing.T) {
 				}
 				inbox.Send(msg)
 			}
-			done <- true
+			sendDone <- true
 		}(i)
 	}
 
 	// Wait for all senders to finish
 	for i := 0; i < numSenders; i++ {
-		<-done
+		<-sendDone
 	}
 
-	// All messages should be received
-	expectedMessages := numSenders * numMessages
-	receivedCount := 0
-	for {
-		_, ok := inbox.TryReceive()
-		if !ok {
-			break
-		}
-		receivedCount++
-	}
-
+	// Wait for receiver to finish and verify count
+	receivedCount := <-receiveDone
 	if receivedCount != expectedMessages {
 		t.Errorf("expected to receive %d messages, got %d", expectedMessages, receivedCount)
 	}

@@ -7,6 +7,11 @@ import (
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
+// =============================================================================
+// Orchestrator Lifecycle Tests
+// =============================================================================
+
+// TestOrchestrator_WaitsForScheduledTime verifies that orchestrators wait until scheduled time before transitioning to Pending.
 func TestOrchestrator_WaitsForScheduledTime(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -57,6 +62,7 @@ func TestOrchestrator_WaitsForScheduledTime(t *testing.T) {
 	}
 }
 
+// TestOrchestrator_ConfigUpdate_InPreRun verifies that config updates can be received during PreRun state.
 func TestOrchestrator_ConfigUpdate_InPreRun(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -83,14 +89,27 @@ func TestOrchestrator_ConfigUpdate_InPreRun(t *testing.T) {
 	}
 	configUpdateChan <- newConfig
 
-	// Orchestrator should receive config and continue waiting
-	// Just verify it doesn't panic or exit early
+	// Wait for orchestrator to process the config update
 	time.Sleep(100 * time.Millisecond)
+
+	// Verify orchestrator received and logged the config update
+	infoLogs := logger.GetEntriesByLevel("INFO")
+	foundConfigUpdate := false
+	for _, entry := range infoLogs {
+		if entry.Message == "received config update in PreRun" {
+			foundConfigUpdate = true
+			break
+		}
+	}
+	if !foundConfigUpdate {
+		t.Error("expected orchestrator to receive and log config update")
+	}
 
 	// Close to trigger completion
 	close(cancelChan)
 }
 
+// TestOrchestrator_Cancel_InPreRun verifies that orchestrators can be cancelled during PreRun state.
 func TestOrchestrator_Cancel_InPreRun(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -139,6 +158,7 @@ func TestOrchestrator_Cancel_InPreRun(t *testing.T) {
 	}
 }
 
+// TestOrchestrator_ScheduledTimeInPast verifies that orchestrators transition immediately when scheduled in the past.
 func TestOrchestrator_ScheduledTimeInPast(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -188,6 +208,7 @@ func TestOrchestrator_ScheduledTimeInPast(t *testing.T) {
 	}
 }
 
+// TestOrchestrator_SendsHeartbeats verifies that orchestrators send periodic heartbeat messages at the configured interval.
 func TestOrchestrator_SendsHeartbeats(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
@@ -245,6 +266,7 @@ DONE:
 	close(cancelChan)
 }
 
+// TestOrchestrator_StopsHeartbeatsOnCompletion verifies that heartbeat messages cease after orchestrator completes.
 func TestOrchestrator_StopsHeartbeatsOnCompletion(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()

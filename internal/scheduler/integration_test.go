@@ -7,8 +7,11 @@ import (
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
-// Integration tests verify end-to-end functionality
+// =============================================================================
+// Integration Tests
+// =============================================================================
 
+// TestIntegration_ScheduleAndExecuteJob verifies end-to-end scheduling and execution of a single job.
 func TestIntegration_ScheduleAndExecuteJob(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -17,15 +20,13 @@ func TestIntegration_ScheduleAndExecuteJob(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	mockDB := testutil.NewMockDB()
 
-	// Create job scheduled to run in 1 second
+	// Round to next minute for cron scheduling
 	now := time.Now()
-	futureTime := now.Add(1 * time.Second)
-
-	// Round to next minute for cron
-	futureTime = futureTime.Truncate(time.Minute).Add(time.Minute)
+	futureTime := now.Truncate(time.Minute).Add(time.Minute)
 
 	// Create cron expression for that exact minute
-	cronExpr := futureTime.Format("4 15 2 1 *") // minute hour day month dow
+	// Format uses Go time format constants: 4=minute, 15=hour, 2=day, 1=month, *=any day-of-week
+	cronExpr := futureTime.Format("4 15 2 1 *")
 
 	mockDB.SetJobs([]*testutil.Job{
 		{ID: "job1", Schedule: cronExpr},
@@ -73,6 +74,7 @@ func TestIntegration_ScheduleAndExecuteJob(t *testing.T) {
 	}
 }
 
+// TestIntegration_MultipleJobsOverlapping verifies that multiple jobs scheduled for the same time execute concurrently.
 func TestIntegration_MultipleJobsOverlapping(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -84,6 +86,7 @@ func TestIntegration_MultipleJobsOverlapping(t *testing.T) {
 	// Create 3 jobs all scheduled for same time in the future
 	now := time.Now()
 	futureTime := now.Truncate(time.Minute).Add(time.Minute)
+	// Format uses Go time format constants: 4=minute, 15=hour, 2=day, 1=month, *=any day-of-week
 	cronExpr := futureTime.Format("4 15 2 1 *")
 
 	mockDB.SetJobs([]*testutil.Job{
@@ -125,6 +128,7 @@ func TestIntegration_MultipleJobsOverlapping(t *testing.T) {
 	}
 }
 
+// TestIntegration_HeartbeatOrphaning verifies that orchestrators without heartbeats are automatically marked as orphaned.
 func TestIntegration_HeartbeatOrphaning(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -135,7 +139,7 @@ func TestIntegration_HeartbeatOrphaning(t *testing.T) {
 
 	config := DefaultSchedulerConfig()
 	config.OrchestratorHeartbeatInterval = 100 * time.Millisecond
-	config.MaxMissedHeartbeats = 2
+	config.MaxMissedOrchestratorHeartbeats = 2
 	config.LoopInterval = 100 * time.Millisecond
 
 	syncerConfig := DefaultSyncerConfig()
@@ -183,6 +187,7 @@ func TestIntegration_HeartbeatOrphaning(t *testing.T) {
 	}
 }
 
+// TestIntegration_ShutdownWithActiveJobs verifies graceful shutdown with active orchestrators and buffered updates.
 func TestIntegration_ShutdownWithActiveJobs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -243,6 +248,7 @@ func TestIntegration_ShutdownWithActiveJobs(t *testing.T) {
 	}
 }
 
+// TestIntegration_ConcurrentWrites verifies that syncer correctly handles concurrent database writes from multiple goroutines.
 func TestIntegration_ConcurrentWrites(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")

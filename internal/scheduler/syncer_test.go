@@ -8,6 +8,11 @@ import (
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
+// =============================================================================
+// Job Run Update Buffering Tests
+// =============================================================================
+
+// TestSyncer_BufferJobRunUpdate_BelowThreshold verifies that updates are buffered without flushing when below threshold.
 func TestSyncer_BufferJobRunUpdate_BelowThreshold(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -40,6 +45,7 @@ func TestSyncer_BufferJobRunUpdate_BelowThreshold(t *testing.T) {
 	}
 }
 
+// TestSyncer_BufferJobRunUpdate_ReachesThreshold verifies that a flush is triggered when buffer reaches threshold.
 func TestSyncer_BufferJobRunUpdate_ReachesThreshold(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -67,6 +73,7 @@ func TestSyncer_BufferJobRunUpdate_ReachesThreshold(t *testing.T) {
 	}
 }
 
+// TestSyncer_BufferJobRunUpdate_ExceedsMaximum verifies that an error is returned when buffer exceeds maximum size.
 func TestSyncer_BufferJobRunUpdate_ExceedsMaximum(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -95,6 +102,11 @@ func TestSyncer_BufferJobRunUpdate_ExceedsMaximum(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Stats Buffering Tests
+// =============================================================================
+
+// TestSyncer_BufferStats_BelowThreshold verifies that stats are buffered without flushing when below threshold.
 func TestSyncer_BufferStats_BelowThreshold(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -124,6 +136,7 @@ func TestSyncer_BufferStats_BelowThreshold(t *testing.T) {
 	}
 }
 
+// TestSyncer_BufferStats_ReachesThreshold verifies that a flush is triggered when stats buffer reaches threshold.
 func TestSyncer_BufferStats_ReachesThreshold(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -148,6 +161,11 @@ func TestSyncer_BufferStats_ReachesThreshold(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Flushing Tests
+// =============================================================================
+
+// TestSyncer_FlushJobRunUpdates_Success verifies that buffered updates are flushed to the channel and cleared.
 func TestSyncer_FlushJobRunUpdates_Success(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -189,6 +207,7 @@ func TestSyncer_FlushJobRunUpdates_Success(t *testing.T) {
 	}
 }
 
+// TestSyncer_FlushJobRunUpdates_ChannelFull verifies that flush returns an error when the channel is full.
 func TestSyncer_FlushJobRunUpdates_ChannelFull(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -219,6 +238,7 @@ func TestSyncer_FlushJobRunUpdates_ChannelFull(t *testing.T) {
 	}
 }
 
+// TestSyncer_FlushStats_Success verifies that buffered stats are flushed to the channel and cleared.
 func TestSyncer_FlushStats_Success(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -259,6 +279,7 @@ func TestSyncer_FlushStats_Success(t *testing.T) {
 	}
 }
 
+// TestSyncer_FlushStats_Empty verifies that flushing an empty stats buffer succeeds without error.
 func TestSyncer_FlushStats_Empty(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -271,6 +292,11 @@ func TestSyncer_FlushStats_Empty(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Time-Based Flushing Tests
+// =============================================================================
+
+// TestSyncer_JobRunFlusher_TimeBased verifies that updates are automatically flushed after the flush interval.
 func TestSyncer_JobRunFlusher_TimeBased(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -300,6 +326,7 @@ func TestSyncer_JobRunFlusher_TimeBased(t *testing.T) {
 	}, 1*time.Second, "waiting for time-based flush")
 }
 
+// TestSyncer_StatsFlusher_TimeBased verifies that stats are automatically flushed after the flush interval.
 func TestSyncer_StatsFlusher_TimeBased(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -329,6 +356,11 @@ func TestSyncer_StatsFlusher_TimeBased(t *testing.T) {
 	}, 1*time.Second, "waiting for time-based stats flush")
 }
 
+// =============================================================================
+// Database Syncer Tests
+// =============================================================================
+
+// TestSyncer_JobRunSyncer_WriteSuccess verifies that job run updates are successfully written to the database.
 func TestSyncer_JobRunSyncer_WriteSuccess(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -367,6 +399,7 @@ func TestSyncer_JobRunSyncer_WriteSuccess(t *testing.T) {
 	}
 }
 
+// TestSyncer_JobRunSyncer_WriteFailure verifies that database write errors are logged appropriately.
 func TestSyncer_JobRunSyncer_WriteFailure(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -405,6 +438,7 @@ func TestSyncer_JobRunSyncer_WriteFailure(t *testing.T) {
 	}
 }
 
+// TestSyncer_StatsSyncer_WriteFailure verifies that stats database write errors are logged appropriately.
 func TestSyncer_StatsSyncer_WriteFailure(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -435,6 +469,11 @@ func TestSyncer_StatsSyncer_WriteFailure(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Shutdown Tests
+// =============================================================================
+
+// TestSyncer_Shutdown_FlushesAll verifies that all buffered data is flushed during shutdown.
 func TestSyncer_Shutdown_FlushesAll(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -478,6 +517,7 @@ func TestSyncer_Shutdown_FlushesAll(t *testing.T) {
 	}
 }
 
+// TestSyncer_Shutdown_DrainChannels verifies that shutdown drains all pending channel items before exiting.
 func TestSyncer_Shutdown_DrainChannels(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
@@ -510,6 +550,11 @@ func TestSyncer_Shutdown_DrainChannels(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Concurrency Tests
+// =============================================================================
+
+// TestSyncer_ConcurrentBuffering verifies that concurrent buffering operations are thread-safe.
 func TestSyncer_ConcurrentBuffering(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
