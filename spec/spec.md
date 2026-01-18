@@ -19,6 +19,34 @@ itinerary highly customizable scheduler that orchestrates and monitors jobs runn
   * Extensive tracking of job statistics run time, state change tracking,retries, failures and failure reasons
   * anomally detection for job statistics
 
+## Project Structure
+
+The project follows canonical Go project layout:
+
+```
+itinerary/
+├── cmd/
+│   └── itinerary/           # Main application entry point
+│       └── main.go          # Server/CLI entry point
+│
+├── internal/                # Private application packages
+│   ├── cron/               # Cron expression parser
+│   ├── scheduler/          # Central scheduler component
+│   │   └── index/          # Scheduled run index (lock-free atomic)
+│   └── testutil/           # Shared test utilities and mocks
+│
+├── spec/                   # Technical specifications
+│   ├── spec.md             # This file - overall architecture
+│   └── components/         # Per-component detailed specs
+│       ├── cron-parser/
+│       ├── scheduler/
+│       └── scheduled-run-index/
+│
+├── go.mod                  # Module definition
+└── test.sh                 # Test runner script
+```
+
+All application code lives in `internal/` (not meant for external import). The `cmd/` directory contains executable entry points. Components are organized by functionality with test files co-located alongside implementation.
 
 ## Scheduler component Components
 This section defines the components of the scheduler and how they fit together
@@ -200,11 +228,12 @@ The main loop maintains:
     - requirement_id (fk requirment.id)
     - action_id (fk action_id)
   job_run
-    - id
-    - job_id (fk job.id)
-    - start_time
-    - end time
+    - job_id (fk job.id) (pk with start_time)
+    - start_time (pk with job_id)
+    - end_time
     - state
+    - success
+    - error
   configuration
     -
   scheduler_stats

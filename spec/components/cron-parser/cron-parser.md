@@ -261,7 +261,7 @@ Parse errors returned for:
 ## File Structure
 
 ```
-lib/cron/
+internal/cron/
 ├── cron.go           # Main CronSchedule type and public API
 ├── parser.go         # Parsing logic
 ├── matcher.go        # Occurrence matching logic

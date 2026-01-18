@@ -358,7 +358,7 @@ func (s *Scheduler) loop() {
 - BTree or other structures (no advantage for this use case)
 
 ## Package Location
-`lib/scheduler/index/` - Part of scheduler package
+`internal/scheduler/index/` - Part of scheduler package
 
 ## Dependencies
 - Standard library only
@@ -366,7 +366,7 @@ func (s *Scheduler) loop() {
 
 ## Files Structure
 ```
-lib/scheduler/index/
+internal/scheduler/index/
 ├── scheduled_run.go          # ScheduledRun type
 ├── index.go                   # ScheduledRunIndex implementation
 ├── index_test.go              # Unit tests

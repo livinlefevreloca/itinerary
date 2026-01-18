@@ -1,0 +1,656 @@
+package scheduler
+
+import (
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/testutil"
+)
+
+// RunID Generation Tests
+
+func TestGenerateRunID_Deterministic(t *testing.T) {
+	jobID := "job123"
+	scheduledAt := time.Unix(1704067200, 0) // 2024-01-01 00:00:00 UTC
+
+	runID1 := generateRunID(jobID, scheduledAt)
+	runID2 := generateRunID(jobID, scheduledAt)
+
+	expected := "job123:1704067200"
+	if runID1 != expected {
+		t.Errorf("expected runID to be %s, got %s", expected, runID1)
+	}
+
+	if runID1 != runID2 {
+		t.Error("expected deterministic runID generation")
+	}
+}
+
+func TestGenerateRunID_DifferentJobs(t *testing.T) {
+	scheduledAt := time.Unix(1704067200, 0)
+
+	runID1 := generateRunID("job1", scheduledAt)
+	runID2 := generateRunID("job2", scheduledAt)
+
+	if runID1 == runID2 {
+		t.Error("expected different runIDs for different jobs")
+	}
+
+	if runID1 != "job1:1704067200" {
+		t.Errorf("expected job1:1704067200, got %s", runID1)
+	}
+
+	if runID2 != "job2:1704067200" {
+		t.Errorf("expected job2:1704067200, got %s", runID2)
+	}
+}
+
+func TestGenerateRunID_DifferentTimes(t *testing.T) {
+	jobID := "job1"
+
+	runID1 := generateRunID(jobID, time.Unix(1704067200, 0))
+	runID2 := generateRunID(jobID, time.Unix(1704067260, 0))
+
+	if runID1 == runID2 {
+		t.Error("expected different runIDs for different times")
+	}
+
+	if runID1 != "job1:1704067200" {
+		t.Errorf("expected job1:1704067200, got %s", runID1)
+	}
+
+	if runID2 != "job1:1704067260" {
+		t.Errorf("expected job1:1704067260, got %s", runID2)
+	}
+}
+
+// Initialization Tests
+
+func TestNewScheduler_Success(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	mockDB := testutil.NewMockDB()
+	mockDB.SetJobs([]*testutil.Job{
+		{ID: "job1", Schedule: "*/5 * * * *"},
+		{ID: "job2", Schedule: "0 * * * *"},
+	})
+
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger)
+	if err != nil {
+		t.Fatalf("unexpected error creating scheduler: %v", err)
+	}
+
+	if scheduler == nil {
+		t.Fatal("expected scheduler to be created")
+	}
+
+	if scheduler.index == nil {
+		t.Error("expected index to be initialized")
+	}
+
+	if scheduler.inbox == nil {
+		t.Error("expected inbox to be initialized")
+	}
+
+	if scheduler.syncer == nil {
+		t.Error("expected syncer to be initialized")
+	}
+
+	if scheduler.activeOrchestrators == nil {
+		t.Error("expected activeOrchestrators map to be initialized")
+	}
+}
+
+func TestNewScheduler_DBQueryFails(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	mockDB := testutil.NewMockDB()
+	mockDB.SetQueryError(fmt.Errorf("database connection failed"))
+
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	_, err := NewScheduler(config, syncerConfig, mockDB, logger)
+	if err == nil {
+		t.Error("expected error when DB query fails")
+	}
+
+	if err != nil && !contains(err.Error(), "failed to query jobs on startup") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestNewScheduler_InvalidCronSchedule(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	mockDB := testutil.NewMockDB()
+	mockDB.SetJobs([]*testutil.Job{
+		{ID: "job1", Schedule: "*/5 * * * *"},       // Valid
+		{ID: "job2", Schedule: "invalid cron expr"}, // Invalid
+		{ID: "job3", Schedule: "0 * * * *"},         // Valid
+	})
+
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should log error for invalid job
+	errorLogs := logger.GetEntriesByLevel("ERROR")
+	found := false
+	for _, entry := range errorLogs {
+		if entry.Message == "failed to parse cron schedule on startup" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected error log for invalid cron schedule")
+	}
+
+	// Scheduler should still be created with valid jobs
+	if scheduler == nil {
+		t.Fatal("expected scheduler to be created despite invalid job")
+	}
+}
+
+// Message Processing Tests
+
+func TestScheduler_HandleOrchestratorStateChange(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create orchestrator
+	runID := "job1:1704067200"
+	state := &OrchestratorState{
+		RunID:      runID,
+		JobID:      "job1",
+		Status:     OrchestratorPreRun,
+		CancelChan: make(chan struct{}),
+	}
+	scheduler.activeOrchestrators[runID] = state
+
+	// Send state change message
+	msg := InboxMessage{
+		Type: MsgOrchestratorStateChange,
+		Data: OrchestratorStateChangeMsg{
+			RunID:     runID,
+			NewStatus: OrchestratorPending,
+			Timestamp: time.Now(),
+		},
+	}
+
+	scheduler.handleMessage(msg)
+
+	// Verify status updated
+	if state.Status != OrchestratorPending {
+		t.Errorf("expected status to be Pending, got %v", state.Status)
+	}
+
+	// Verify update buffered
+	stats := scheduler.syncer.GetStats()
+	if stats.BufferedJobRunUpdates != 1 {
+		t.Errorf("expected 1 buffered update, got %d", stats.BufferedJobRunUpdates)
+	}
+}
+
+func TestScheduler_HandleOrchestratorComplete(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create running orchestrator
+	runID := "job1:1704067200"
+	state := &OrchestratorState{
+		RunID:      runID,
+		JobID:      "job1",
+		Status:     OrchestratorRunning,
+		CancelChan: make(chan struct{}),
+	}
+	scheduler.activeOrchestrators[runID] = state
+
+	// Send completion message
+	completedAt := time.Now()
+	msg := InboxMessage{
+		Type: MsgOrchestratorComplete,
+		Data: OrchestratorCompleteMsg{
+			RunID:       runID,
+			Success:     true,
+			CompletedAt: completedAt,
+			Error:       nil,
+		},
+	}
+
+	scheduler.handleMessage(msg)
+
+	// Verify status updated
+	if state.Status != OrchestratorCompleted {
+		t.Errorf("expected status to be Completed, got %v", state.Status)
+	}
+
+	if !state.CompletedAt.Equal(completedAt) {
+		t.Error("expected CompletedAt to be set")
+	}
+
+	// Verify update buffered
+	updates := scheduler.syncer.GetStats().BufferedJobRunUpdates
+	if updates != 1 {
+		t.Errorf("expected 1 buffered update, got %d", updates)
+	}
+}
+
+func TestScheduler_HandleCancelRun(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create orchestrator
+	runID := "job1:1704067200"
+	cancelChan := make(chan struct{})
+	state := &OrchestratorState{
+		RunID:      runID,
+		JobID:      "job1",
+		Status:     OrchestratorRunning,
+		CancelChan: cancelChan,
+	}
+	scheduler.activeOrchestrators[runID] = state
+
+	// Send cancel message
+	msg := InboxMessage{
+		Type: MsgCancelRun,
+		Data: CancelRunMsg{
+			RunID: runID,
+		},
+	}
+
+	scheduler.handleMessage(msg)
+
+	// Verify cancel channel closed
+	select {
+	case <-cancelChan:
+		// Expected - channel closed
+	default:
+		t.Error("expected cancel channel to be closed")
+	}
+
+	// Verify status updated
+	if state.Status != OrchestratorCancelled {
+		t.Errorf("expected status to be Cancelled, got %v", state.Status)
+	}
+}
+
+func TestScheduler_HandleCancelRun_NonExistent(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Send cancel for non-existent run
+	msg := InboxMessage{
+		Type: MsgCancelRun,
+		Data: CancelRunMsg{
+			RunID: "nonexistent",
+		},
+	}
+
+	// Should not panic
+	scheduler.handleMessage(msg)
+
+	// Should log warning
+	if !logger.HasWarning() {
+		t.Error("expected warning for cancelling non-existent run")
+	}
+}
+
+// Heartbeat Monitoring Tests
+
+func TestScheduler_CheckHeartbeats_NoMissed(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	config.OrchestratorHeartbeatInterval = 10 * time.Second
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create orchestrator with recent heartbeat
+	now := time.Now()
+	runID := "job1:1704067200"
+	state := &OrchestratorState{
+		RunID:            runID,
+		JobID:            "job1",
+		Status:           OrchestratorRunning,
+		LastHeartbeat:    now.Add(-5 * time.Second), // 5 seconds ago
+		MissedHeartbeats: 0,
+	}
+	scheduler.activeOrchestrators[runID] = state
+
+	// Check heartbeats
+	scheduler.checkHeartbeats(now)
+
+	// No missed heartbeats
+	if state.MissedHeartbeats != 0 {
+		t.Errorf("expected 0 missed heartbeats, got %d", state.MissedHeartbeats)
+	}
+
+	// Status unchanged
+	if state.Status != OrchestratorRunning {
+		t.Errorf("expected status to remain Running, got %v", state.Status)
+	}
+}
+
+func TestScheduler_CheckHeartbeats_OneMissed(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	config.OrchestratorHeartbeatInterval = 10 * time.Second
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create orchestrator with old heartbeat
+	now := time.Now()
+	runID := "job1:1704067200"
+	state := &OrchestratorState{
+		RunID:            runID,
+		JobID:            "job1",
+		Status:           OrchestratorRunning,
+		LastHeartbeat:    now.Add(-15 * time.Second), // 15 seconds ago
+		MissedHeartbeats: 0,
+	}
+	scheduler.activeOrchestrators[runID] = state
+
+	// Check heartbeats
+	scheduler.checkHeartbeats(now)
+
+	// One missed heartbeat
+	if state.MissedHeartbeats != 1 {
+		t.Errorf("expected 1 missed heartbeat, got %d", state.MissedHeartbeats)
+	}
+
+	// Status still running (not orphaned yet)
+	if state.Status != OrchestratorRunning {
+		t.Errorf("expected status to remain Running, got %v", state.Status)
+	}
+
+	// Warning should be logged
+	if !logger.HasWarning() {
+		t.Error("expected warning for missed heartbeat")
+	}
+}
+
+func TestScheduler_CheckHeartbeats_Orphaned(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	config.OrchestratorHeartbeatInterval = 10 * time.Second
+	config.MaxMissedHeartbeats = 5
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create orchestrator with many missed heartbeats
+	now := time.Now()
+	runID := "job1:1704067200"
+	state := &OrchestratorState{
+		RunID:            runID,
+		JobID:            "job1",
+		Status:           OrchestratorRunning,
+		LastHeartbeat:    now.Add(-60 * time.Second), // 60 seconds ago
+		MissedHeartbeats: 4,                          // One more will trigger orphan
+	}
+	scheduler.activeOrchestrators[runID] = state
+
+	// Check heartbeats
+	scheduler.checkHeartbeats(now)
+
+	// Should be marked as orphaned
+	if state.MissedHeartbeats != 5 {
+		t.Errorf("expected 5 missed heartbeats, got %d", state.MissedHeartbeats)
+	}
+
+	if state.Status != OrchestratorOrphaned {
+		t.Errorf("expected status to be Orphaned, got %v", state.Status)
+	}
+
+	// Error should be logged
+	if !logger.HasError() {
+		t.Error("expected error for orphaned orchestrator")
+	}
+
+	// Update should be buffered
+	updates := scheduler.syncer.GetStats().BufferedJobRunUpdates
+	if updates != 1 {
+		t.Errorf("expected 1 buffered update for orphaned status, got %d", updates)
+	}
+}
+
+func TestScheduler_CheckHeartbeats_SkipsCompleted(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create completed orchestrator with very old heartbeat
+	now := time.Now()
+	runID := "job1:1704067200"
+	state := &OrchestratorState{
+		RunID:            runID,
+		JobID:            "job1",
+		Status:           OrchestratorCompleted,
+		LastHeartbeat:    now.Add(-1 * time.Hour), // Very old
+		MissedHeartbeats: 0,
+	}
+	scheduler.activeOrchestrators[runID] = state
+
+	// Check heartbeats
+	scheduler.checkHeartbeats(now)
+
+	// Should not be checked (completed orchestrators skipped)
+	if state.MissedHeartbeats != 0 {
+		t.Error("completed orchestrator should not have heartbeat checked")
+	}
+}
+
+func TestScheduler_HandleHeartbeat_ResetsCounter(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create orchestrator with missed heartbeats
+	runID := "job1:1704067200"
+	state := &OrchestratorState{
+		RunID:            runID,
+		JobID:            "job1",
+		Status:           OrchestratorRunning,
+		MissedHeartbeats: 3,
+	}
+	scheduler.activeOrchestrators[runID] = state
+
+	// Send heartbeat
+	heartbeatTime := time.Now()
+	msg := InboxMessage{
+		Type: MsgOrchestratorHeartbeat,
+		Data: OrchestratorHeartbeatMsg{
+			RunID:     runID,
+			Timestamp: heartbeatTime,
+		},
+	}
+
+	scheduler.handleMessage(msg)
+
+	// Counter should be reset
+	if state.MissedHeartbeats != 0 {
+		t.Errorf("expected missed heartbeats to be reset to 0, got %d", state.MissedHeartbeats)
+	}
+
+	// Timestamp should be updated
+	if !state.LastHeartbeat.Equal(heartbeatTime) {
+		t.Error("expected LastHeartbeat to be updated")
+	}
+}
+
+// Cleanup Tests
+
+func TestScheduler_CleanupOrchestrators_NoCleanup(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	config.GracePeriod = 30 * time.Second
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create completed orchestrator within grace period
+	now := time.Now()
+	runID := "job1:1704067200"
+	state := &OrchestratorState{
+		RunID:       runID,
+		JobID:       "job1",
+		Status:      OrchestratorCompleted,
+		ScheduledAt: now.Add(-10 * time.Second), // 10 seconds ago
+	}
+	scheduler.activeOrchestrators[runID] = state
+
+	// Cleanup
+	scheduler.cleanupOrchestrators(now)
+
+	// Should NOT be removed (still in grace period)
+	if _, exists := scheduler.activeOrchestrators[runID]; !exists {
+		t.Error("orchestrator should not be cleaned up within grace period")
+	}
+}
+
+func TestScheduler_CleanupOrchestrators_AfterGrace(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	config.GracePeriod = 30 * time.Second
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create completed orchestrator past grace period
+	now := time.Now()
+	runID := "job1:1704067200"
+	state := &OrchestratorState{
+		RunID:       runID,
+		JobID:       "job1",
+		Status:      OrchestratorCompleted,
+		ScheduledAt: now.Add(-40 * time.Second), // 40 seconds ago
+	}
+	scheduler.activeOrchestrators[runID] = state
+
+	// Cleanup
+	scheduler.cleanupOrchestrators(now)
+
+	// Should be removed
+	if _, exists := scheduler.activeOrchestrators[runID]; exists {
+		t.Error("orchestrator should be cleaned up after grace period")
+	}
+}
+
+func TestScheduler_CleanupOrchestrators_MultipleStates(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	config.GracePeriod = 30 * time.Second
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create orchestrators in various terminal states, all past grace period
+	now := time.Now()
+	pastTime := now.Add(-40 * time.Second)
+
+	states := []OrchestratorStatus{
+		OrchestratorCompleted,
+		OrchestratorFailed,
+		OrchestratorCancelled,
+		OrchestratorOrphaned,
+	}
+
+	for i, status := range states {
+		runID := fmt.Sprintf("job%d:%d", i, pastTime.Unix())
+		scheduler.activeOrchestrators[runID] = &OrchestratorState{
+			RunID:       runID,
+			Status:      status,
+			ScheduledAt: pastTime,
+		}
+	}
+
+	// Cleanup
+	scheduler.cleanupOrchestrators(now)
+
+	// All should be removed
+	if len(scheduler.activeOrchestrators) != 0 {
+		t.Errorf("expected all orchestrators to be cleaned up, got %d remaining", len(scheduler.activeOrchestrators))
+	}
+}
+
+func TestScheduler_CleanupOrchestrators_SkipsActive(t *testing.T) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	config.GracePeriod = 30 * time.Second
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(t, config, syncerConfig, logger)
+
+	// Create active orchestrators, all past grace period
+	now := time.Now()
+	pastTime := now.Add(-40 * time.Second)
+
+	activeStates := []OrchestratorStatus{
+		OrchestratorPreRun,
+		OrchestratorPending,
+		OrchestratorRunning,
+	}
+
+	for i, status := range activeStates {
+		runID := fmt.Sprintf("job%d:%d", i, pastTime.Unix())
+		scheduler.activeOrchestrators[runID] = &OrchestratorState{
+			RunID:       runID,
+			Status:      status,
+			ScheduledAt: pastTime,
+		}
+	}
+
+	// Cleanup
+	scheduler.cleanupOrchestrators(now)
+
+	// None should be removed (still active)
+	if len(scheduler.activeOrchestrators) != 3 {
+		t.Errorf("expected 3 active orchestrators to remain, got %d", len(scheduler.activeOrchestrators))
+	}
+}
+
+// Helper functions
+
+func createTestScheduler(t *testing.T, config SchedulerConfig, syncerConfig SyncerConfig, logger *testutil.TestLogger) *Scheduler {
+	inbox := NewInbox(config.InboxBufferSize, config.InboxSendTimeout, logger)
+	syncer := NewSyncer(syncerConfig, logger)
+
+	return &Scheduler{
+		config:              config,
+		logger:              logger,
+		index:               nil, // Not needed for most tests
+		activeOrchestrators: make(map[string]*OrchestratorState),
+		inbox:               inbox,
+		syncer:              syncer,
+		shutdown:            make(chan struct{}),
+		rebuildIndexChan:    make(chan struct{}, 1),
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && s[:len(substr)] == substr
+}

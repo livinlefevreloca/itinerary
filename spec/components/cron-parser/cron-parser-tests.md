@@ -299,7 +299,7 @@
 ## Test Organization
 
 ```
-lib/cron/cron_test.go
+internal/cron/cron_test.go
 
 TestParse_Valid
 TestParse_Invalid

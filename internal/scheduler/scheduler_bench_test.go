@@ -1,0 +1,324 @@
+package scheduler
+
+import (
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/testutil"
+)
+
+// Benchmark tests for scheduler performance
+
+func BenchmarkGenerateRunID(b *testing.B) {
+	jobID := "job123"
+	scheduledAt := time.Now()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = generateRunID(jobID, scheduledAt)
+	}
+}
+
+func BenchmarkInbox_SendReceive(b *testing.B) {
+	logger := testutil.NewTestLogger()
+	inbox := NewInbox(10000, 100*time.Millisecond, logger)
+
+	msg := InboxMessage{
+		Type: MsgShutdown,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		inbox.Send(msg)
+		inbox.TryReceive()
+	}
+}
+
+func BenchmarkSyncer_BufferAndFlush_100(b *testing.B) {
+	benchmarkSyncerBufferAndFlush(b, 100)
+}
+
+func BenchmarkSyncer_BufferAndFlush_1000(b *testing.B) {
+	benchmarkSyncerBufferAndFlush(b, 1000)
+}
+
+func BenchmarkSyncer_BufferAndFlush_10000(b *testing.B) {
+	benchmarkSyncerBufferAndFlush(b, 10000)
+}
+
+func benchmarkSyncerBufferAndFlush(b *testing.B, count int) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSyncerConfig()
+	config.JobRunChannelSize = count * 2
+	syncer := NewSyncer(config, logger)
+
+	mockDB := testutil.NewMockDB()
+	syncer.Start(mockDB)
+	defer syncer.Shutdown()
+
+	updates := make([]JobRunUpdate, count)
+	for i := 0; i < count; i++ {
+		updates[i] = JobRunUpdate{
+			UpdateID: fmt.Sprintf("update-%d", i),
+			RunID:    fmt.Sprintf("run-%d", i),
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Buffer
+		for j := 0; j < count; j++ {
+			syncer.BufferJobRunUpdate(updates[j])
+		}
+
+		// Flush
+		syncer.FlushJobRunUpdates()
+
+		// Wait for writes
+		for mockDB.CountWrittenUpdates() < count {
+			time.Sleep(1 * time.Millisecond)
+		}
+
+		mockDB.ClearWritten()
+	}
+}
+
+func BenchmarkScheduler_ProcessInbox_100(b *testing.B) {
+	benchmarkProcessInbox(b, 100)
+}
+
+func BenchmarkScheduler_ProcessInbox_1000(b *testing.B) {
+	benchmarkProcessInbox(b, 1000)
+}
+
+func BenchmarkScheduler_ProcessInbox_10000(b *testing.B) {
+	benchmarkProcessInbox(b, 10000)
+}
+
+func benchmarkProcessInbox(b *testing.B, messageCount int) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	config.InboxBufferSize = messageCount * 2
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(b, config, syncerConfig, logger)
+
+	// Prepare messages
+	messages := make([]InboxMessage, messageCount)
+	for i := 0; i < messageCount; i++ {
+		messages[i] = InboxMessage{
+			Type: MsgShutdown,
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Fill inbox
+		for j := 0; j < messageCount; j++ {
+			scheduler.inbox.Send(messages[j])
+		}
+
+		// Process
+		scheduler.processInbox()
+	}
+}
+
+func BenchmarkScheduler_ScheduleOrchestrators_10(b *testing.B) {
+	benchmarkScheduleOrchestrators(b, 10)
+}
+
+func BenchmarkScheduler_ScheduleOrchestrators_100(b *testing.B) {
+	benchmarkScheduleOrchestrators(b, 100)
+}
+
+func BenchmarkScheduler_ScheduleOrchestrators_1000(b *testing.B) {
+	benchmarkScheduleOrchestrators(b, 1000)
+}
+
+func benchmarkScheduleOrchestrators(b *testing.B, count int) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+	syncerConfig.MaxBufferedJobRunUpdates = count * 10
+
+	scheduler := createTestScheduler(b, config, syncerConfig, logger)
+
+	// Create mock index with runs
+	now := time.Now()
+	runs := make([]ScheduledRun, count)
+	for i := 0; i < count; i++ {
+		runs[i] = ScheduledRun{
+			JobID:       fmt.Sprintf("job%d", i),
+			ScheduledAt: now.Add(time.Duration(i) * time.Second),
+		}
+	}
+
+	// Mock index that returns these runs
+	scheduler.index = &MockIndex{runs: runs}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err := scheduler.scheduleOrchestrators(now)
+		if err != nil {
+			b.Fatalf("unexpected error: %v", err)
+		}
+
+		// Clear for next iteration
+		scheduler.activeOrchestrators = make(map[string]*OrchestratorState)
+		scheduler.syncer.jobRunUpdateBuffer = make([]JobRunUpdate, 0)
+	}
+}
+
+func BenchmarkScheduler_SingleIteration_Empty(b *testing.B) {
+	benchmarkSingleIteration(b, 0)
+}
+
+func BenchmarkScheduler_SingleIteration_10Orchestrators(b *testing.B) {
+	benchmarkSingleIteration(b, 10)
+}
+
+func BenchmarkScheduler_SingleIteration_100Orchestrators(b *testing.B) {
+	benchmarkSingleIteration(b, 100)
+}
+
+func BenchmarkScheduler_SingleIteration_1000Orchestrators(b *testing.B) {
+	benchmarkSingleIteration(b, 1000)
+}
+
+func benchmarkSingleIteration(b *testing.B, orchestratorCount int) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(b, config, syncerConfig, logger)
+
+	// Create orchestrators
+	now := time.Now()
+	for i := 0; i < orchestratorCount; i++ {
+		runID := fmt.Sprintf("job%d:%d", i, now.Unix())
+		scheduler.activeOrchestrators[runID] = &OrchestratorState{
+			RunID:            runID,
+			JobID:            fmt.Sprintf("job%d", i),
+			Status:           OrchestratorRunning,
+			ScheduledAt:      now,
+			LastHeartbeat:    now,
+			MissedHeartbeats: 0,
+		}
+	}
+
+	// Mock empty index
+	scheduler.index = &MockIndex{runs: []ScheduledRun{}}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		scheduler.iteration()
+	}
+}
+
+func BenchmarkScheduler_CheckHeartbeats_1000(b *testing.B) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(b, config, syncerConfig, logger)
+
+	// Create 1000 orchestrators
+	now := time.Now()
+	for i := 0; i < 1000; i++ {
+		runID := fmt.Sprintf("job%d:%d", i, now.Unix())
+		scheduler.activeOrchestrators[runID] = &OrchestratorState{
+			RunID:            runID,
+			JobID:            fmt.Sprintf("job%d", i),
+			Status:           OrchestratorRunning,
+			ScheduledAt:      now,
+			LastHeartbeat:    now.Add(-5 * time.Second),
+			MissedHeartbeats: 0,
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		scheduler.checkHeartbeats(now)
+	}
+}
+
+func BenchmarkScheduler_CleanupOrchestrators_1000(b *testing.B) {
+	logger := testutil.NewTestLogger()
+	config := DefaultSchedulerConfig()
+	config.GracePeriod = 30 * time.Second
+	syncerConfig := DefaultSyncerConfig()
+
+	scheduler := createTestScheduler(b, config, syncerConfig, logger)
+
+	// Create 1000 completed orchestrators past grace period
+	now := time.Now()
+	pastTime := now.Add(-40 * time.Second)
+
+	for i := 0; i < 1000; i++ {
+		runID := fmt.Sprintf("job%d:%d", i, pastTime.Unix())
+		scheduler.activeOrchestrators[runID] = &OrchestratorState{
+			RunID:       runID,
+			JobID:       fmt.Sprintf("job%d", i),
+			Status:      OrchestratorCompleted,
+			ScheduledAt: pastTime,
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Make copy for each iteration
+		if i > 0 {
+			scheduler.activeOrchestrators = make(map[string]*OrchestratorState)
+			for j := 0; j < 1000; j++ {
+				runID := fmt.Sprintf("job%d:%d", j, pastTime.Unix())
+				scheduler.activeOrchestrators[runID] = &OrchestratorState{
+					RunID:       runID,
+					JobID:       fmt.Sprintf("job%d", j),
+					Status:      OrchestratorCompleted,
+					ScheduledAt: pastTime,
+				}
+			}
+		}
+
+		scheduler.cleanupOrchestrators(now)
+	}
+}
+
+// Mock index for benchmarking
+type MockIndex struct {
+	runs []ScheduledRun
+}
+
+func (m *MockIndex) Query(start, end time.Time) []ScheduledRun {
+	return m.runs
+}
+
+func (m *MockIndex) Len() int {
+	return len(m.runs)
+}
+
+func (m *MockIndex) Swap(runs []ScheduledRun) {
+	m.runs = runs
+}
+
+// Helper for benchmarks
+type BenchmarkT interface {
+	Fatalf(format string, args ...interface{})
+}
+
+func createTestScheduler(t BenchmarkT, config SchedulerConfig, syncerConfig SyncerConfig, logger *testutil.TestLogger) *Scheduler {
+	inbox := NewInbox(config.InboxBufferSize, config.InboxSendTimeout, logger)
+	syncer := NewSyncer(syncerConfig, logger)
+
+	return &Scheduler{
+		config:              config,
+		logger:              logger,
+		index:               nil,
+		activeOrchestrators: make(map[string]*OrchestratorState),
+		inbox:               inbox,
+		syncer:              syncer,
+		shutdown:            make(chan struct{}),
+		rebuildIndexChan:    make(chan struct{}, 1),
+	}
+}

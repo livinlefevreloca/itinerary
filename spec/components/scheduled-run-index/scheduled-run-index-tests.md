@@ -383,7 +383,7 @@ func assertTimesInRange(t *testing.T, runs []ScheduledRun, start, end time.Time)
 
 ```bash
 # All unit tests
-cd lib/scheduler/index
+cd internal/scheduler/index
 go test ./...
 
 # With race detector

@@ -47,6 +47,10 @@ type SchedulerConfig struct {
 
     // Timeout for sending to inbox
     InboxSendTimeout time.Duration // Default: 5 seconds
+
+    // Orchestrator heartbeat configuration
+    OrchestratorHeartbeatInterval time.Duration // Default: 10 seconds (how often orchestrators send heartbeats)
+    MaxMissedHeartbeats           int           // Default: 5 (mark as orphaned after this many missed)
 }
 ```
 
@@ -59,25 +63,26 @@ type SchedulerConfig struct {
 ```go
 func DefaultSchedulerConfig() SchedulerConfig {
     return SchedulerConfig{
-        PreScheduleInterval:  10 * time.Second,
-        IndexRebuildInterval: 1 * time.Minute,
-        LookaheadWindow:      10 * time.Minute,
-        GracePeriod:          30 * time.Second,
-        LoopInterval:         1 * time.Second,
-        InboxBufferSize:      10000,
-        InboxSendTimeout:     5 * time.Second,
+        PreScheduleInterval:           10 * time.Second,
+        IndexRebuildInterval:          1 * time.Minute,
+        LookaheadWindow:               10 * time.Minute,
+        GracePeriod:                   30 * time.Second,
+        LoopInterval:                  1 * time.Second,
+        InboxBufferSize:               10000,
+        InboxSendTimeout:              5 * time.Second,
+        OrchestratorHeartbeatInterval: 10 * time.Second,
+        MaxMissedHeartbeats:           5,
     }
 }
 
 func DefaultSyncerConfig() SyncerConfig {
     return SyncerConfig{
-        MaxBufferedJobRunUpdates: 100000,
+        MaxBufferedJobRunUpdates: 10000, // Reduced by 10x to catch issues sooner
         JobRunChannelSize:        1000,
-        JobRunConfirmationsSize:  1000,
         StatsChannelSize:         100,
-        JobRunFlushThreshold:     500,        // Half of channel size
+        JobRunFlushThreshold:     500, // Half of channel size
         JobRunFlushInterval:      1 * time.Second,
-        StatsFlushThreshold:      30,         // 30 iterations (~30 seconds at 1s loop interval)
+        StatsFlushThreshold:      30, // 30 iterations (~30 seconds at 1s loop interval)
         StatsFlushInterval:       30 * time.Second,
     }
 }
@@ -172,7 +177,6 @@ type Syncer struct {
     // Job run update buffering
     jobRunUpdateBuffer  []JobRunUpdate
     jobRunChannel       chan JobRunUpdate
-    jobRunConfirmations chan JobRunUpdateConfirmation
     jobRunFlushRequest  chan struct{} // Signal for manual flush
     lastJobRunFlush     time.Time
 
@@ -189,11 +193,10 @@ type Syncer struct {
 
 type SyncerConfig struct {
     // Maximum buffered job run updates before stopping
-    MaxBufferedJobRunUpdates int // Default: 100000
+    MaxBufferedJobRunUpdates int // Default: 10000
 
     // Channel buffer sizes
     JobRunChannelSize       int // Default: 1000
-    JobRunConfirmationsSize int // Default: 1000
     StatsChannelSize        int // Default: 100
 
     // Job run flushing - dual mechanism (size OR time triggers flush)
@@ -207,18 +210,17 @@ type SyncerConfig struct {
 
 func NewSyncer(config SyncerConfig, logger *slog.Logger) *Syncer {
     return &Syncer{
-        config:              config,
-        logger:              logger,
-        jobRunUpdateBuffer:  make([]JobRunUpdate, 0),
-        jobRunChannel:       make(chan JobRunUpdate, config.JobRunChannelSize),
-        jobRunConfirmations: make(chan JobRunUpdateConfirmation, config.JobRunConfirmationsSize),
-        jobRunFlushRequest:  make(chan struct{}, 1),
-        lastJobRunFlush:     time.Now(),
-        statsBuffer:         make([]SchedulerIterationStats, 0),
-        statsChannel:        make(chan StatsUpdate, config.StatsChannelSize),
-        statsFlushRequest:   make(chan struct{}, 1),
-        lastStatsFlush:      time.Now(),
-        shutdown:            make(chan struct{}),
+        config:             config,
+        logger:             logger,
+        jobRunUpdateBuffer: make([]JobRunUpdate, 0),
+        jobRunChannel:      make(chan JobRunUpdate, config.JobRunChannelSize),
+        jobRunFlushRequest: make(chan struct{}, 1),
+        lastJobRunFlush:    time.Now(),
+        statsBuffer:        make([]SchedulerIterationStats, 0),
+        statsChannel:       make(chan StatsUpdate, config.StatsChannelSize),
+        statsFlushRequest:  make(chan struct{}, 1),
+        lastStatsFlush:     time.Now(),
+        shutdown:           make(chan struct{}),
     }
 }
 
@@ -257,7 +259,7 @@ func (s *Syncer) FlushJobRunUpdates() error {
     for _, update := range s.jobRunUpdateBuffer {
         select {
         case s.jobRunChannel <- update:
-            // Sent successfully
+            // Successfully sent
         default:
             s.logger.Warn("job run channel full, keeping updates buffered",
                 "buffered_count", len(s.jobRunUpdateBuffer))
@@ -324,13 +326,12 @@ func (s *Syncer) GetStats() SyncerStats {
 
 // Start launches background goroutines for syncing
 func (s *Syncer) Start(db *sql.DB) {
-    s.wg.Add(5) // 5 goroutines total
+    s.wg.Add(4) // 4 goroutines total
 
     go s.runJobRunFlusher()
     go s.runStatsFlusher()
     go s.runJobRunSyncer(db)
     go s.runStatsSyncer(db)
-    go s.processJobRunConfirmations()
 }
 
 // runJobRunFlusher periodically flushes job run updates
@@ -435,14 +436,9 @@ func (s *Syncer) Shutdown() error {
     // This ensures:
     // - Flushers have exited (stopped adding to buffers)
     // - Syncers have drained all items from channels
-    // - Confirmation processor has finished processing
     // WaitGroup is ONLY used during shutdown for coordination
     s.logger.Debug("waiting for all goroutines to exit")
     s.wg.Wait()
-
-    // Step 5: Close confirmation channel
-    // Safe now - no goroutines are writing to it
-    close(s.jobRunConfirmations)
 
     s.logger.Info("syncer shutdown complete")
     return nil
@@ -478,15 +474,17 @@ type Scheduler struct {
 ### Orchestrator State
 ```go
 type OrchestratorState struct {
-    RunID        string
-    JobID        string
-    JobConfig    *Job // Current job configuration
-    ScheduledAt  time.Time
-    ActualStart  time.Time
-    Status       OrchestratorStatus
-    CancelChan   chan struct{}
-    ConfigUpdate chan *Job // For updating config while in PreRun
-    CompletedAt  time.Time
+    RunID            string
+    JobID            string
+    JobConfig        *Job // Current job configuration
+    ScheduledAt      time.Time
+    ActualStart      time.Time
+    Status           OrchestratorStatus
+    CancelChan       chan struct{}
+    ConfigUpdate     chan *Job // For updating config while in PreRun
+    CompletedAt      time.Time
+    LastHeartbeat    time.Time // Last time heartbeat was received
+    MissedHeartbeats int       // Consecutive missed heartbeats
 }
 
 type OrchestratorStatus int
@@ -498,6 +496,7 @@ const (
     OrchestratorCompleted                        // Completed successfully
     OrchestratorFailed                           // Failed
     OrchestratorCancelled                        // Cancelled
+    OrchestratorOrphaned                         // No heartbeats, assumed dead
 )
 
 func (s OrchestratorStatus) String() string {
@@ -514,6 +513,8 @@ func (s OrchestratorStatus) String() string {
         return "failed"
     case OrchestratorCancelled:
         return "cancelled"
+    case OrchestratorOrphaned:
+        return "orphaned"
     default:
         return "unknown"
     }
@@ -535,6 +536,7 @@ const (
     MsgOrchestratorStateChange MessageType = iota // Generic state change
     MsgOrchestratorComplete
     MsgOrchestratorFailed
+    MsgOrchestratorHeartbeat // Periodic heartbeat from orchestrator
 
     // From watcher
     MsgCancelRun
@@ -557,6 +559,8 @@ func (m MessageType) String() string {
         return "orchestrator_complete"
     case MsgOrchestratorFailed:
         return "orchestrator_failed"
+    case MsgOrchestratorHeartbeat:
+        return "orchestrator_heartbeat"
     case MsgCancelRun:
         return "cancel_run"
     case MsgUpdateRunConfig:
@@ -588,6 +592,11 @@ type OrchestratorCompleteMsg struct {
     Success     bool
     CompletedAt time.Time
     Error       error
+}
+
+type OrchestratorHeartbeatMsg struct {
+    RunID     string
+    Timestamp time.Time
 }
 
 type CancelRunMsg struct {
@@ -630,20 +639,14 @@ type StatsResponse struct {
 ### Job Run Update Tracking
 ```go
 type JobRunUpdate struct {
-    UpdateID    string // UUID for tracking confirmation
-    RunID       string
+    UpdateID    string // UUID for idempotent database writes
+    RunID       string // Deterministic format: "jobID:unixTimestamp"
     JobID       string
     ScheduledAt time.Time
     CompletedAt time.Time
     Status      string
     Success     bool
     Error       error
-}
-
-type JobRunUpdateConfirmation struct {
-    UpdateID string
-    Success  bool
-    Error    error
 }
 ```
 
@@ -715,7 +718,7 @@ func (s *Scheduler) performIndexRebuild(db *sql.DB) {
     for _, job := range jobs {
         schedule, err := cron.Parse(job.Schedule)
         if err != nil {
-            s.logger.Warn("failed to parse cron schedule",
+            s.logger.Error("failed to parse cron schedule",
                 "job_id", job.ID,
                 "schedule", job.Schedule,
                 "error", err)
@@ -758,18 +761,15 @@ func (s *Syncer) runJobRunSyncer(db *sql.DB) {
     for update := range s.jobRunChannel {
         err := writeJobRunUpdate(db, update)
 
-        confirmation := JobRunUpdateConfirmation{
-            UpdateID: update.UpdateID,
-            Success:  err == nil,
-            Error:    err,
-        }
-
-        // Send confirmation (non-blocking)
-        select {
-        case s.jobRunConfirmations <- confirmation:
-        default:
-            s.logger.Warn("failed to send job run confirmation",
-                "update_id", update.UpdateID)
+        if err != nil {
+            s.logger.Error("failed to write job run update",
+                "update_id", update.UpdateID,
+                "run_id", update.RunID,
+                "error", err)
+        } else {
+            s.logger.Debug("wrote job run update",
+                "update_id", update.UpdateID,
+                "run_id", update.RunID)
         }
     }
 
@@ -789,23 +789,6 @@ func (s *Syncer) runStatsSyncer(db *sql.DB) {
     }
 
     s.logger.Debug("stats syncer shut down")
-}
-
-// processJobRunConfirmations handles confirmations from the syncer
-func (s *Syncer) processJobRunConfirmations() {
-    defer s.wg.Done()
-
-    for confirmation := range s.jobRunConfirmations {
-        if !confirmation.Success {
-            s.logger.Error("job run update failed",
-                "update_id", confirmation.UpdateID,
-                "error", confirmation.Error)
-            // Update is lost - we don't re-add to buffer
-            // This is a design choice - could implement retry logic
-        }
-    }
-
-    s.logger.Debug("confirmation processor shut down")
 }
 
 // Helper functions for database writes
@@ -850,8 +833,9 @@ func NewScheduler(config SchedulerConfig, syncerConfig SyncerConfig, db *sql.DB,
     for _, job := range jobs {
         schedule, err := cron.Parse(job.Schedule)
         if err != nil {
-            logger.Warn("failed to parse cron schedule on startup",
+            logger.Error("failed to parse cron schedule on startup",
                 "job_id", job.ID,
+                "schedule", job.Schedule,
                 "error", err)
             continue
         }
@@ -935,14 +919,17 @@ func (s *Scheduler) iteration() {
     // Step 2: Process ALL inbox messages
     messagesProcessed := s.processInbox()
 
-    // Step 3: Clean up completed orchestrators
+    // Step 3: Check for missed heartbeats and mark orphaned
+    s.checkHeartbeats(start)
+
+    // Step 4: Clean up completed orchestrators
     s.cleanupOrchestrators(start)
 
-    // Step 4: Record iteration statistics
+    // Step 5: Record iteration statistics
     // Stats are automatically flushed by syncer based on size/time
     s.recordIterationStats(start, messagesProcessed)
 
-    // Step 5: Update inbox depth stats
+    // Step 6: Update inbox depth stats
     s.inbox.UpdateDepthStats()
 }
 ```
@@ -959,10 +946,11 @@ func (s *Scheduler) scheduleOrchestrators(now time.Time) error {
     runs := s.index.Query(start, end)
 
     for _, run := range runs {
-        // Generate unique runID using UUID
-        runID := generateRunID()
+        // Generate deterministic runID from jobID and scheduled time
+        // Format: "jobID:unixTimestamp" (e.g., "job123:1704067200")
+        runID := generateRunID(run.JobID, run.ScheduledAt)
 
-        // Check if already scheduled
+        // Check if already scheduled - O(1) map lookup
         if _, exists := s.activeOrchestrators[runID]; exists {
             continue
         }
@@ -976,14 +964,16 @@ func (s *Scheduler) scheduleOrchestrators(now time.Time) error {
         configUpdateChan := make(chan *Job, 1)
 
         state := &OrchestratorState{
-            RunID:        runID,
-            JobID:        run.JobID,
-            JobConfig:    nil, // Will be set when orchestrator starts
-            ScheduledAt:  run.ScheduledAt,
-            ActualStart:  time.Time{},
-            Status:       OrchestratorPreRun,
-            CancelChan:   cancelChan,
-            ConfigUpdate: configUpdateChan,
+            RunID:            runID,
+            JobID:            run.JobID,
+            JobConfig:        nil, // Will be set when orchestrator starts
+            ScheduledAt:      run.ScheduledAt,
+            ActualStart:      time.Time{},
+            Status:           OrchestratorPreRun,
+            CancelChan:       cancelChan,
+            ConfigUpdate:     configUpdateChan,
+            LastHeartbeat:    now, // Initialize to current time
+            MissedHeartbeats: 0,
         }
 
         // Record in active orchestrators
@@ -1007,12 +997,14 @@ func (s *Scheduler) scheduleOrchestrators(now time.Time) error {
     return nil
 }
 
-func generateRunID() string {
-    // Use UUID for uniqueness
-    return uuid.New().String()
+func generateRunID(jobID string, scheduledAt time.Time) string {
+    // Deterministic runID: jobID:unixTimestamp
+    // Same job at same time always produces same runID
+    return fmt.Sprintf("%s:%d", jobID, scheduledAt.Unix())
 }
 
 func generateUpdateID() string {
+    // Use UUID for update deduplication in database
     return uuid.New().String()
 }
 ```
@@ -1046,6 +1038,8 @@ func (s *Scheduler) handleMessage(msg InboxMessage) {
         s.handleOrchestratorComplete(msg)
     case MsgOrchestratorFailed:
         s.handleOrchestratorFailed(msg)
+    case MsgOrchestratorHeartbeat:
+        s.handleOrchestratorHeartbeat(msg)
     case MsgCancelRun:
         s.handleCancelRun(msg)
     case MsgUpdateRunConfig:
@@ -1061,6 +1055,19 @@ func (s *Scheduler) handleMessage(msg InboxMessage) {
     default:
         s.logger.Warn("unknown message type", "type", msg.Type)
     }
+}
+
+func (s *Scheduler) handleOrchestratorHeartbeat(msg InboxMessage) {
+    data := msg.Data.(OrchestratorHeartbeatMsg)
+
+    state, exists := s.activeOrchestrators[data.RunID]
+    if !exists {
+        return
+    }
+
+    // Update heartbeat tracking
+    state.LastHeartbeat = data.Timestamp
+    state.MissedHeartbeats = 0 // Reset counter on successful heartbeat
 }
 
 func (s *Scheduler) handleOrchestratorStateChange(msg InboxMessage) {
@@ -1218,7 +1225,58 @@ func (s *Scheduler) handleGetStats(msg InboxMessage) {
 }
 ```
 
-### Step 3: Cleanup Orchestrators
+### Step 3: Check Heartbeats
+```go
+func (s *Scheduler) checkHeartbeats(now time.Time) {
+    for runID, state := range s.activeOrchestrators {
+        // Only check heartbeats for active orchestrators
+        if state.Status != OrchestratorPreRun &&
+           state.Status != OrchestratorPending &&
+           state.Status != OrchestratorRunning {
+            continue
+        }
+
+        // Check if heartbeat is overdue
+        timeSinceLastHeartbeat := now.Sub(state.LastHeartbeat)
+        expectedInterval := s.config.OrchestratorHeartbeatInterval
+
+        if timeSinceLastHeartbeat > expectedInterval {
+            // Increment missed heartbeat counter
+            state.MissedHeartbeats++
+
+            s.logger.Warn("missed heartbeat",
+                "run_id", runID,
+                "job_id", state.JobID,
+                "missed_count", state.MissedHeartbeats,
+                "time_since_last", timeSinceLastHeartbeat)
+
+            // Check if we should mark as orphaned
+            if state.MissedHeartbeats >= s.config.MaxMissedHeartbeats {
+                s.logger.Error("marking orchestrator as orphaned",
+                    "run_id", runID,
+                    "job_id", state.JobID,
+                    "missed_count", state.MissedHeartbeats)
+
+                state.Status = OrchestratorOrphaned
+                state.CompletedAt = now
+
+                // Buffer update
+                s.syncer.BufferJobRunUpdate(JobRunUpdate{
+                    UpdateID:    generateUpdateID(),
+                    RunID:       runID,
+                    JobID:       state.JobID,
+                    CompletedAt: now,
+                    Status:      OrchestratorOrphaned.String(),
+                    Success:     false,
+                    Error:       fmt.Errorf("orchestrator orphaned after %d missed heartbeats", state.MissedHeartbeats),
+                })
+            }
+        }
+    }
+}
+```
+
+### Step 4: Cleanup Orchestrators
 ```go
 func (s *Scheduler) cleanupOrchestrators(now time.Time) {
     toDelete := []string{}
@@ -1227,7 +1285,8 @@ func (s *Scheduler) cleanupOrchestrators(now time.Time) {
         // Only clean up completed orchestrators
         if state.Status != OrchestratorCompleted &&
            state.Status != OrchestratorFailed &&
-           state.Status != OrchestratorCancelled {
+           state.Status != OrchestratorCancelled &&
+           state.Status != OrchestratorOrphaned {
             continue
         }
 
@@ -1248,7 +1307,7 @@ func (s *Scheduler) cleanupOrchestrators(now time.Time) {
 }
 ```
 
-### Step 4: Record Iteration Stats
+### Step 5: Record Iteration Stats
 ```go
 func (s *Scheduler) recordIterationStats(start time.Time, messagesProcessed int) {
     stats := SchedulerIterationStats{
@@ -1269,6 +1328,11 @@ func (s *Scheduler) recordIterationStats(start time.Time, messagesProcessed int)
 ```go
 func (s *Scheduler) runOrchestrator(jobID string, scheduledAt time.Time, runID string,
                                     cancelChan chan struct{}, configUpdate chan *Job) {
+
+    // Start heartbeat sender in background
+    heartbeatDone := make(chan struct{})
+    defer close(heartbeatDone)
+    go s.sendHeartbeats(runID, heartbeatDone)
 
     // PreRun state: wait for scheduled time or config updates
     waitDuration := time.Until(scheduledAt)
@@ -1327,6 +1391,30 @@ START:
         },
     })
 }
+
+// sendHeartbeats sends periodic heartbeat messages to the main loop
+func (s *Scheduler) sendHeartbeats(runID string, done chan struct{}) {
+    ticker := time.NewTicker(s.config.OrchestratorHeartbeatInterval)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-done:
+            // Orchestrator finished, stop sending heartbeats
+            return
+
+        case <-ticker.C:
+            // Send heartbeat
+            s.inbox.Send(InboxMessage{
+                Type: MsgOrchestratorHeartbeat,
+                Data: OrchestratorHeartbeatMsg{
+                    RunID:     runID,
+                    Timestamp: time.Now(),
+                },
+            })
+        }
+    }
+}
 ```
 
 ## Shutdown Handling
@@ -1366,8 +1454,9 @@ func (s *Scheduler) Shutdown() {
 ## Dependencies
 
 ### Internal
-- `lib/cron` - Cron expression parsing
-- `lib/scheduler/index` - Scheduled run index
+- `internal/cron` - Cron expression parsing
+- `internal/scheduler/index` - Scheduled run index
+- `internal/testutil` - Test utilities and mocks
 
 ### Standard Library
 - `time` - Time operations
@@ -1378,20 +1467,26 @@ func (s *Scheduler) Shutdown() {
 - `sync` - WaitGroup for coordinating goroutine shutdown
 
 ### External
-- `github.com/google/uuid` - UUID generation for runIDs
+- `github.com/google/uuid` - UUID generation for updateIDs (idempotent database writes)
 
 ## File Structure
 
 ```
-lib/scheduler/
-├── config.go           # Configuration types and defaults (SchedulerConfig, SyncerConfig)
-├── inbox.go            # Inbox type with helper methods and stats
-├── syncer.go           # Syncer type for database writes and buffering
-├── scheduler.go        # Main Scheduler type and loop
-├── messages.go         # Inbox message types and payloads
-├── orchestrator.go     # Orchestrator state and stub implementation
-├── indexbuilder.go     # Index builder background goroutine
-└── scheduler_test.go   # Tests (to be defined)
+internal/scheduler/
+├── config.go              # Configuration types and defaults (SchedulerConfig, SyncerConfig)
+├── inbox.go               # Inbox type with helper methods and stats
+├── syncer.go              # Syncer type for database writes and buffering
+├── scheduler.go           # Main Scheduler type and loop
+├── messages.go            # Inbox message types and payloads
+├── orchestrator.go        # Orchestrator state and stub implementation
+├── indexbuilder.go        # Index builder background goroutine
+├── config_test.go         # Configuration validation tests
+├── inbox_test.go          # Inbox operations tests
+├── syncer_test.go         # Syncer buffering/flushing tests
+├── scheduler_test.go      # Main scheduler loop tests
+├── orchestrator_test.go   # Orchestrator lifecycle tests
+├── integration_test.go    # End-to-end integration tests
+└── scheduler_bench_test.go # Performance benchmarks
 ```
 
 ## Testing Strategy
@@ -1403,11 +1498,16 @@ Will be defined in `scheduler-tests.md` but key areas:
 - Cleanup timing (grace period)
 - Shutdown and cancellation
 - Config updates in PreRun state
+- Heartbeat monitoring
+  - Heartbeat tracking and reset
+  - Missed heartbeat detection
+  - Orphaned orchestrator marking
+  - Cleanup of orphaned orchestrators
 - Job run update buffering and flushing
   - Size-based flushing (JobRunFlushThreshold reached)
   - Time-based flushing (JobRunFlushInterval elapsed)
   - Dual trigger scenarios
-  - Confirmation handling
+  - Write failure logging
 - Stats buffering and flushing
   - Size-based flushing (StatsFlushThreshold reached)
   - Time-based flushing (StatsFlushInterval elapsed)
@@ -1417,15 +1517,16 @@ Will be defined in `scheduler-tests.md` but key areas:
 
 ## Resolved Design Questions
 
-1. **RunID generation**: Using UUIDs via `github.com/google/uuid`
-2. **Syncer error handling**: Buffered writes with confirmations. Main loop buffers updates and flushes periodically. Syncer confirms writes. If buffer exceeds maximum, scheduler stops.
-3. **Job definition reloading**: Index builder goroutine queries DB on `IndexRebuildInterval` cadence
-4. **Stats aggregation**: Recorded per-iteration, buffered, synced on `STATS_PERIOD`
-5. **Inbox overflow**: Senders block with timeout. Timeouts logged and tracked in stats. Inbox depth is configurable with large default (10,000).
+1. **RunID generation**: Deterministic format `jobID:unixTimestamp`. Same job at same time always produces same runID, enabling O(1) duplicate prevention via map lookup.
+2. **UpdateID generation**: Using UUIDs via `github.com/google/uuid` for idempotent database writes.
+3. **Syncer error handling**: Buffered writes with logging. Main loop buffers updates and flushes periodically. Write failures are logged but not retried. If buffer exceeds maximum, scheduler stops.
+4. **Job definition reloading**: Index builder goroutine queries DB on `IndexRebuildInterval` cadence
+5. **Stats aggregation**: Recorded per-iteration, buffered, synced on `STATS_PERIOD`
+6. **Inbox overflow**: Senders block with timeout. Timeouts logged and tracked in stats. Inbox depth is configurable with large default (10,000).
+7. **Orchestrator monitoring**: Heartbeats sent on `OrchestratorHeartbeatInterval`. Orchestrators marked as orphaned after `MaxMissedHeartbeats` consecutive misses.
 
 ## Future Enhancements
 
-- Retry logic for failed job run updates
 - Metrics/observability hooks (Prometheus, etc.)
 - Configurable orchestrator pool limits
 - Advanced scheduling strategies (priority, backfill)
