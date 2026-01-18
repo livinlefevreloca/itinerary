@@ -42,21 +42,11 @@ type SchedulerConfig struct {
     // Main loop iteration interval
     LoopInterval time.Duration // Default: 1 second
 
-    // How often to sync stats to database
-    StatsPeriod time.Duration // Default: 30 seconds
-
     // Inbox buffer size
     InboxBufferSize int // Default: 10000
 
     // Timeout for sending to inbox
     InboxSendTimeout time.Duration // Default: 5 seconds
-
-    // Maximum buffered job run updates before stopping
-    MaxBufferedJobRunUpdates int // Default: 100000
-
-    // Syncer channel buffer sizes
-    JobRunSyncerBufferSize int // Default: 1000
-    StatsSyncerBufferSize  int // Default: 100
 }
 ```
 
@@ -64,23 +54,29 @@ type SchedulerConfig struct {
 - `IndexRebuildInterval < LookaheadWindow` (required)
 - `GracePeriod > LoopInterval` (recommended)
 - `PreScheduleInterval >= LoopInterval` (recommended)
-- `StatsPeriod >= LoopInterval` (required)
 
 ### Defaults
 ```go
 func DefaultSchedulerConfig() SchedulerConfig {
     return SchedulerConfig{
-        PreScheduleInterval:      10 * time.Second,
-        IndexRebuildInterval:     1 * time.Minute,
-        LookaheadWindow:          10 * time.Minute,
-        GracePeriod:              30 * time.Second,
-        LoopInterval:             1 * time.Second,
-        StatsPeriod:              30 * time.Second,
-        InboxBufferSize:          10000,
-        InboxSendTimeout:         5 * time.Second,
+        PreScheduleInterval:  10 * time.Second,
+        IndexRebuildInterval: 1 * time.Minute,
+        LookaheadWindow:      10 * time.Minute,
+        GracePeriod:          30 * time.Second,
+        LoopInterval:         1 * time.Second,
+        InboxBufferSize:      10000,
+        InboxSendTimeout:     5 * time.Second,
+    }
+}
+
+func DefaultSyncerConfig() SyncerConfig {
+    return SyncerConfig{
         MaxBufferedJobRunUpdates: 100000,
-        JobRunSyncerBufferSize:   1000,
-        StatsSyncerBufferSize:    100,
+        JobRunChannelSize:        1000,
+        JobRunConfirmationsSize:  1000,
+        StatsChannelSize:         100,
+        StatsPeriod:              30 * time.Second,
+        JobRunFlushThreshold:     500, // Half of channel size
     }
 }
 ```
@@ -163,6 +159,151 @@ func (ib *Inbox) Stats() InboxStats {
 }
 ```
 
+### Syncer Type
+```go
+// Syncer handles all database write operations and buffering
+type Syncer struct {
+    // Configuration
+    config SyncerConfig
+    logger *slog.Logger
+
+    // Job run update buffering
+    jobRunUpdateBuffer  []JobRunUpdate
+    jobRunChannel       chan JobRunUpdate
+    jobRunConfirmations chan JobRunUpdateConfirmation
+
+    // Stats buffering
+    statsBuffer       []SchedulerIterationStats
+    statsChannel      chan StatsUpdate
+    lastStatsSyncTime time.Time
+}
+
+type SyncerConfig struct {
+    // Maximum buffered job run updates before stopping
+    MaxBufferedJobRunUpdates int // Default: 100000
+
+    // Channel buffer sizes
+    JobRunChannelSize       int // Default: 1000
+    JobRunConfirmationsSize int // Default: 1000
+    StatsChannelSize        int // Default: 100
+
+    // How often to sync stats to database
+    StatsPeriod time.Duration // Default: 30 seconds
+
+    // Flush job runs when buffer reaches this size
+    JobRunFlushThreshold int // Default: 500 (half of channel size)
+}
+
+func NewSyncer(config SyncerConfig, logger *slog.Logger) *Syncer {
+    return &Syncer{
+        config:              config,
+        logger:              logger,
+        jobRunUpdateBuffer:  make([]JobRunUpdate, 0),
+        jobRunChannel:       make(chan JobRunUpdate, config.JobRunChannelSize),
+        jobRunConfirmations: make(chan JobRunUpdateConfirmation, config.JobRunConfirmationsSize),
+        statsBuffer:         make([]SchedulerIterationStats, 0),
+        statsChannel:        make(chan StatsUpdate, config.StatsChannelSize),
+    }
+}
+
+// BufferJobRunUpdate adds an update to the buffer and flushes if needed
+func (s *Syncer) BufferJobRunUpdate(update JobRunUpdate) error {
+    s.jobRunUpdateBuffer = append(s.jobRunUpdateBuffer, update)
+
+    // Check if we should flush
+    if len(s.jobRunUpdateBuffer) >= s.config.JobRunFlushThreshold {
+        return s.FlushJobRunUpdates()
+    }
+
+    // Check if buffer exceeded maximum
+    if len(s.jobRunUpdateBuffer) > s.config.MaxBufferedJobRunUpdates {
+        return fmt.Errorf("job run update buffer exceeded maximum size: %d > %d",
+            len(s.jobRunUpdateBuffer), s.config.MaxBufferedJobRunUpdates)
+    }
+
+    return nil
+}
+
+// FlushJobRunUpdates sends all buffered updates to the syncer channel
+func (s *Syncer) FlushJobRunUpdates() error {
+    for _, update := range s.jobRunUpdateBuffer {
+        select {
+        case s.jobRunChannel <- update:
+            // Sent successfully
+        default:
+            s.logger.Warn("job run channel full, keeping updates buffered",
+                "buffered_count", len(s.jobRunUpdateBuffer))
+            return fmt.Errorf("job run channel full")
+        }
+    }
+
+    // All sent, clear buffer
+    s.jobRunUpdateBuffer = make([]JobRunUpdate, 0)
+    return nil
+}
+
+// BufferStats adds iteration stats to the buffer
+func (s *Syncer) BufferStats(stats SchedulerIterationStats) {
+    s.statsBuffer = append(s.statsBuffer, stats)
+}
+
+// MaybeSyncStats syncs stats if the period has elapsed
+func (s *Syncer) MaybeSyncStats(now time.Time) {
+    if now.Sub(s.lastStatsSyncTime) < s.config.StatsPeriod {
+        return
+    }
+
+    if len(s.statsBuffer) == 0 {
+        return
+    }
+
+    update := StatsUpdate{
+        Stats: s.statsBuffer,
+    }
+
+    select {
+    case s.statsChannel <- update:
+        s.statsBuffer = make([]SchedulerIterationStats, 0)
+        s.lastStatsSyncTime = now
+        s.logger.Debug("synced stats", "count", len(update.Stats))
+    default:
+        s.logger.Warn("stats channel full, skipping sync")
+    }
+}
+
+// GetStats returns current syncer statistics
+func (s *Syncer) GetStats() SyncerStats {
+    return SyncerStats{
+        BufferedJobRunUpdates: len(s.jobRunUpdateBuffer),
+        BufferedStats:         len(s.statsBuffer),
+    }
+}
+
+// Start launches background goroutines for syncing
+func (s *Syncer) Start(db *sql.DB) {
+    go s.runJobRunSyncer(db)
+    go s.runStatsSyncer(db)
+    go s.processJobRunConfirmations()
+}
+
+// Shutdown closes all channels
+func (s *Syncer) Shutdown() error {
+    // Flush any remaining updates
+    if err := s.FlushJobRunUpdates(); err != nil {
+        s.logger.Warn("failed to flush job run updates on shutdown", "error", err)
+    }
+
+    close(s.jobRunChannel)
+    close(s.statsChannel)
+    return nil
+}
+
+type SyncerStats struct {
+    BufferedJobRunUpdates int
+    BufferedStats         int
+}
+```
+
 ### Main Scheduler Type
 ```go
 type Scheduler struct {
@@ -173,20 +314,13 @@ type Scheduler struct {
     // State
     index               *index.ScheduledRunIndex
     activeOrchestrators map[string]*OrchestratorState // runID → state
-    statsBuffer         []SchedulerIterationStats     // Buffered stats
-    jobRunUpdateBuffer  []JobRunUpdate                // Buffered job run updates
-    lastStatsSyncTime   time.Time
 
-    // Communication channels
-    inbox    *Inbox
-    shutdown chan struct{}
+    // Communication
+    inbox  *Inbox
+    syncer *Syncer
 
-    // Syncer channels (for database writes with confirmations)
-    jobRunSyncer        chan JobRunUpdate
-    jobRunConfirmations chan JobRunUpdateConfirmation
-    statsSyncer         chan StatsUpdate
-
-    // Index builder notification
+    // Control
+    shutdown         chan struct{}
     rebuildIndexChan chan struct{}
 }
 ```
@@ -339,6 +473,7 @@ type GetStatsMsg struct {
 type StatsResponse struct {
     SchedulerStats SchedulerStats
     InboxStats     InboxStats
+    SyncerStats    SyncerStats
 }
 ```
 
@@ -374,10 +509,8 @@ type SchedulerIterationStats struct {
 }
 
 type SchedulerStats struct {
-    Iterations              []SchedulerIterationStats
-    TotalIterations         int64
-    BufferedJobRunUpdates   int
-    FailedJobRunUpdatesSent int64
+    ActiveOrchestratorCount int
+    IndexSize               int
 }
 
 type StatsUpdate struct {
@@ -464,10 +597,13 @@ func queryJobDefinitions(db *sql.DB) ([]*Job, error) {
 }
 ```
 
-### Job Run Syncer with Confirmations
+### Syncer Background Goroutines
+The syncer manages its own background goroutines for database writes.
+
 ```go
-func (s *Scheduler) runJobRunSyncer(db *sql.DB) {
-    for update := range s.jobRunSyncer {
+// runJobRunSyncer writes job run updates to the database
+func (s *Syncer) runJobRunSyncer(db *sql.DB) {
+    for update := range s.jobRunChannel {
         err := writeJobRunUpdate(db, update)
 
         confirmation := JobRunUpdateConfirmation{
@@ -486,22 +622,34 @@ func (s *Scheduler) runJobRunSyncer(db *sql.DB) {
     }
 }
 
-func writeJobRunUpdate(db *sql.DB, update JobRunUpdate) error {
-    // TODO: Actual database write
-    return nil
-}
-```
-
-### Stats Syncer
-```go
-func (s *Scheduler) runStatsSyncer(db *sql.DB) {
-    for update := range s.statsSyncer {
+// runStatsSyncer writes stats updates to the database
+func (s *Syncer) runStatsSyncer(db *sql.DB) {
+    for update := range s.statsChannel {
         err := writeStatsUpdate(db, update)
         if err != nil {
             // Just log, stats writes are not critical
-            slog.Error("failed to write stats update", "error", err)
+            s.logger.Error("failed to write stats update", "error", err)
         }
     }
+}
+
+// processJobRunConfirmations handles confirmations from the syncer
+func (s *Syncer) processJobRunConfirmations() {
+    for confirmation := range s.jobRunConfirmations {
+        if !confirmation.Success {
+            s.logger.Error("job run update failed",
+                "update_id", confirmation.UpdateID,
+                "error", confirmation.Error)
+            // Update is lost - we don't re-add to buffer
+            // This is a design choice - could implement retry logic
+        }
+    }
+}
+
+// Helper functions for database writes
+func writeJobRunUpdate(db *sql.DB, update JobRunUpdate) error {
+    // TODO: Actual database write
+    return nil
 }
 
 func writeStatsUpdate(db *sql.DB, update StatsUpdate) error {
@@ -514,7 +662,7 @@ func writeStatsUpdate(db *sql.DB, update StatsUpdate) error {
 
 ### Initialization
 ```go
-func NewScheduler(config SchedulerConfig, db *sql.DB, logger *slog.Logger) (*Scheduler, error) {
+func NewScheduler(config SchedulerConfig, syncerConfig SyncerConfig, db *sql.DB, logger *slog.Logger) (*Scheduler, error) {
     // 1. Validate configuration
     if err := validateConfig(config); err != nil {
         return nil, err
@@ -523,7 +671,10 @@ func NewScheduler(config SchedulerConfig, db *sql.DB, logger *slog.Logger) (*Sch
     // 2. Create inbox
     inbox := NewInbox(config.InboxBufferSize, config.InboxSendTimeout, logger)
 
-    // 3. Build initial index (synchronously on startup)
+    // 3. Create syncer
+    syncer := NewSyncer(syncerConfig, logger)
+
+    // 4. Build initial index (synchronously on startup)
     now := time.Now()
     start := now.Add(-config.GracePeriod)
     end := now.Add(config.LookaheadWindow)
@@ -554,21 +705,16 @@ func NewScheduler(config SchedulerConfig, db *sql.DB, logger *slog.Logger) (*Sch
 
     idx := index.NewScheduledRunIndex(runs)
 
-    // 4. Initialize scheduler
+    // 5. Initialize scheduler
     s := &Scheduler{
-        config:                config,
-        logger:                logger,
-        index:                 idx,
-        activeOrchestrators:   make(map[string]*OrchestratorState),
-        statsBuffer:           make([]SchedulerIterationStats, 0),
-        jobRunUpdateBuffer:    make([]JobRunUpdate, 0),
-        lastStatsSyncTime:     now,
-        inbox:                 inbox,
-        shutdown:              make(chan struct{}),
-        jobRunSyncer:          make(chan JobRunUpdate, config.JobRunSyncerBufferSize),
-        jobRunConfirmations:   make(chan JobRunUpdateConfirmation, config.JobRunSyncerBufferSize),
-        statsSyncer:           make(chan StatsUpdate, config.StatsSyncerBufferSize),
-        rebuildIndexChan:      make(chan struct{}, 1),
+        config:              config,
+        logger:              logger,
+        index:               idx,
+        activeOrchestrators: make(map[string]*OrchestratorState),
+        inbox:               inbox,
+        syncer:              syncer,
+        shutdown:            make(chan struct{}),
+        rebuildIndexChan:    make(chan struct{}, 1),
     }
 
     return s, nil
@@ -580,11 +726,11 @@ func NewScheduler(config SchedulerConfig, db *sql.DB, logger *slog.Logger) (*Sch
 func (s *Scheduler) Start(db *sql.DB) {
     s.logger.Info("starting scheduler")
 
-    // Launch background goroutines
+    // Start syncer background goroutines
+    s.syncer.Start(db)
+
+    // Start index builder
     go s.runIndexBuilder(db)
-    go s.runJobRunSyncer(db)
-    go s.runStatsSyncer(db)
-    go s.processJobRunConfirmations()
 
     // Start main loop
     s.run()
@@ -618,7 +764,11 @@ func (s *Scheduler) iteration() {
     start := time.Now()
 
     // Step 1: Schedule new orchestrators
-    s.scheduleOrchestrators(start)
+    if err := s.scheduleOrchestrators(start); err != nil {
+        s.logger.Error("scheduler stopping due to buffer overflow", "error", err)
+        close(s.shutdown)
+        return
+    }
 
     // Step 2: Process ALL inbox messages
     messagesProcessed := s.processInbox()
@@ -626,13 +776,11 @@ func (s *Scheduler) iteration() {
     // Step 3: Clean up completed orchestrators
     s.cleanupOrchestrators(start)
 
-    // Step 4: Sync stats if needed
-    s.maybeSyncStats(start)
-
-    // Step 5: Record iteration statistics
+    // Step 4: Record iteration statistics and maybe sync
     s.recordIterationStats(start, messagesProcessed)
+    s.syncer.MaybeSyncStats(start)
 
-    // Step 6: Update inbox depth stats
+    // Step 5: Update inbox depth stats
     s.inbox.UpdateDepthStats()
 }
 ```
@@ -641,7 +789,7 @@ func (s *Scheduler) iteration() {
 
 ### Step 1: Schedule Orchestrators
 ```go
-func (s *Scheduler) scheduleOrchestrators(now time.Time) {
+func (s *Scheduler) scheduleOrchestrators(now time.Time) error {
     // Query for jobs to schedule in the next PRE_SCHEDULE_INTERVAL
     start := now
     end := now.Add(s.config.PreScheduleInterval)
@@ -683,14 +831,18 @@ func (s *Scheduler) scheduleOrchestrators(now time.Time) {
         go s.runOrchestrator(run.JobID, run.ScheduledAt, runID, cancelChan, configUpdateChan)
 
         // Buffer job run update
-        s.bufferJobRunUpdate(JobRunUpdate{
+        if err := s.syncer.BufferJobRunUpdate(JobRunUpdate{
             UpdateID:    generateUpdateID(),
             RunID:       runID,
             JobID:       run.JobID,
             ScheduledAt: run.ScheduledAt,
             Status:      OrchestratorPreRun.String(),
-        })
+        }); err != nil {
+            return err
+        }
     }
+
+    return nil
 }
 
 func generateRunID() string {
@@ -759,8 +911,8 @@ func (s *Scheduler) handleOrchestratorStateChange(msg InboxMessage) {
 
     state.Status = data.NewStatus
 
-    // Buffer update
-    s.bufferJobRunUpdate(JobRunUpdate{
+    // Buffer update (ignore error - will be caught in scheduleOrchestrators)
+    s.syncer.BufferJobRunUpdate(JobRunUpdate{
         UpdateID: generateUpdateID(),
         RunID:    data.RunID,
         Status:   data.NewStatus.String(),
@@ -778,8 +930,8 @@ func (s *Scheduler) handleOrchestratorComplete(msg InboxMessage) {
     state.Status = OrchestratorCompleted
     state.CompletedAt = data.CompletedAt
 
-    // Buffer update
-    s.bufferJobRunUpdate(JobRunUpdate{
+    // Buffer update (ignore error - will be caught in scheduleOrchestrators)
+    s.syncer.BufferJobRunUpdate(JobRunUpdate{
         UpdateID:    generateUpdateID(),
         RunID:       data.RunID,
         CompletedAt: data.CompletedAt,
@@ -800,8 +952,8 @@ func (s *Scheduler) handleOrchestratorFailed(msg InboxMessage) {
     state.Status = OrchestratorFailed
     state.CompletedAt = data.CompletedAt
 
-    // Buffer update
-    s.bufferJobRunUpdate(JobRunUpdate{
+    // Buffer update (ignore error - will be caught in scheduleOrchestrators)
+    s.syncer.BufferJobRunUpdate(JobRunUpdate{
         UpdateID:    generateUpdateID(),
         RunID:       data.RunID,
         CompletedAt: data.CompletedAt,
@@ -890,8 +1042,12 @@ func (s *Scheduler) handleGetAllActiveRuns(msg InboxMessage) {
 
 func (s *Scheduler) handleGetStats(msg InboxMessage) {
     response := StatsResponse{
-        SchedulerStats: s.getSchedulerStats(),
-        InboxStats:     s.inbox.Stats(),
+        SchedulerStats: SchedulerStats{
+            ActiveOrchestratorCount: len(s.activeOrchestrators),
+            IndexSize:               s.index.Len(),
+        },
+        InboxStats:  s.inbox.Stats(),
+        SyncerStats: s.syncer.GetStats(),
     }
 
     if msg.ResponseChan != nil {
@@ -930,34 +1086,7 @@ func (s *Scheduler) cleanupOrchestrators(now time.Time) {
 }
 ```
 
-### Step 4: Sync Stats
-```go
-func (s *Scheduler) maybeSyncStats(now time.Time) {
-    if now.Sub(s.lastStatsSyncTime) < s.config.StatsPeriod {
-        return
-    }
-
-    if len(s.statsBuffer) == 0 {
-        return
-    }
-
-    // Send buffered stats to syncer
-    update := StatsUpdate{
-        Stats: s.statsBuffer,
-    }
-
-    select {
-    case s.statsSyncer <- update:
-        s.statsBuffer = make([]SchedulerIterationStats, 0)
-        s.lastStatsSyncTime = now
-        s.logger.Debug("synced stats", "count", len(update.Stats))
-    default:
-        s.logger.Warn("stats syncer channel full, skipping sync")
-    }
-}
-```
-
-### Step 5: Record Iteration Stats
+### Step 4: Record Iteration Stats
 ```go
 func (s *Scheduler) recordIterationStats(start time.Time, messagesProcessed int) {
     stats := SchedulerIterationStats{
@@ -969,65 +1098,7 @@ func (s *Scheduler) recordIterationStats(start time.Time, messagesProcessed int)
         MessagesProcessed:       messagesProcessed,
     }
 
-    s.statsBuffer = append(s.statsBuffer, stats)
-}
-
-func (s *Scheduler) getSchedulerStats() SchedulerStats {
-    return SchedulerStats{
-        Iterations:              s.statsBuffer,
-        TotalIterations:         int64(len(s.statsBuffer)),
-        BufferedJobRunUpdates:   len(s.jobRunUpdateBuffer),
-        FailedJobRunUpdatesSent: 0, // TODO: track this
-    }
-}
-```
-
-### Job Run Update Buffering
-```go
-func (s *Scheduler) bufferJobRunUpdate(update JobRunUpdate) {
-    s.jobRunUpdateBuffer = append(s.jobRunUpdateBuffer, update)
-
-    // Check if we should send updates
-    if len(s.jobRunUpdateBuffer) >= s.config.JobRunSyncerBufferSize/2 {
-        s.flushJobRunUpdates()
-    }
-
-    // Check if buffer is too large
-    if len(s.jobRunUpdateBuffer) > s.config.MaxBufferedJobRunUpdates {
-        s.logger.Error("job run update buffer exceeded maximum size, stopping scheduler",
-            "buffer_size", len(s.jobRunUpdateBuffer),
-            "max_size", s.config.MaxBufferedJobRunUpdates)
-        close(s.shutdown)
-    }
-}
-
-func (s *Scheduler) flushJobRunUpdates() {
-    for _, update := range s.jobRunUpdateBuffer {
-        select {
-        case s.jobRunSyncer <- update:
-            // Sent successfully
-        default:
-            s.logger.Warn("job run syncer channel full",
-                "buffered", len(s.jobRunUpdateBuffer))
-            // Keep in buffer, will retry
-            return
-        }
-    }
-
-    // All sent, clear buffer
-    s.jobRunUpdateBuffer = make([]JobRunUpdate, 0)
-}
-
-func (s *Scheduler) processJobRunConfirmations() {
-    for confirmation := range s.jobRunConfirmations {
-        if !confirmation.Success {
-            s.logger.Error("job run update failed",
-                "update_id", confirmation.UpdateID,
-                "error", confirmation.Error)
-            // Update is lost - we don't re-add to buffer
-            // This is a design choice - could implement retry logic
-        }
-    }
+    s.syncer.BufferStats(stats)
 }
 ```
 
@@ -1112,12 +1183,12 @@ func (s *Scheduler) handleShutdown() {
         }
     }
 
-    // Flush any remaining job run updates
-    s.flushJobRunUpdates()
+    // Shutdown syncer (flushes and closes channels)
+    if err := s.syncer.Shutdown(); err != nil {
+        s.logger.Error("error shutting down syncer", "error", err)
+    }
 
-    // Close syncer channels
-    close(s.jobRunSyncer)
-    close(s.statsSyncer)
+    // Close index builder channel
     close(s.rebuildIndexChan)
 
     s.logger.Info("scheduler shutdown complete")
@@ -1150,13 +1221,13 @@ func (s *Scheduler) Shutdown() {
 
 ```
 lib/scheduler/
-├── config.go           # Configuration types and defaults
-├── inbox.go            # Inbox type with helper methods
+├── config.go           # Configuration types and defaults (SchedulerConfig, SyncerConfig)
+├── inbox.go            # Inbox type with helper methods and stats
+├── syncer.go           # Syncer type for database writes and buffering
 ├── scheduler.go        # Main Scheduler type and loop
-├── messages.go         # Inbox message types
+├── messages.go         # Inbox message types and payloads
 ├── orchestrator.go     # Orchestrator state and stub implementation
 ├── indexbuilder.go     # Index builder background goroutine
-├── syncer.go           # Syncer implementations
 └── scheduler_test.go   # Tests (to be defined)
 ```
 
