@@ -13,10 +13,11 @@ The scheduler loop owns all scheduling state. Any component needing state inform
 
 ### 2. No I/O in Main Loop
 The main loop is strictly computational. All I/O operations are delegated to other goroutines:
-- Database reads/writes → Syncer goroutines
+- Database reads → Index builder goroutine
+- Database writes → Syncer goroutines
 - Kubernetes operations → Orchestrator goroutines
 - External API calls → Watcher goroutine
-- Logging → Async logger goroutine (if needed)
+- Logging → slog (structured logging from stdlib)
 
 ### 3. Deterministic Iteration
 Each loop iteration follows a fixed sequence of operations, making the system predictable and testable.
@@ -29,7 +30,7 @@ type SchedulerConfig struct {
     // How far ahead to launch orchestrators before job start time
     PreScheduleInterval time.Duration // Default: 10 seconds
 
-    // How often to rebuild the scheduled run index
+    // How often the index builder queries DB and rebuilds index
     IndexRebuildInterval time.Duration // Default: 1 minute
 
     // How far ahead to calculate scheduled runs
@@ -41,8 +42,21 @@ type SchedulerConfig struct {
     // Main loop iteration interval
     LoopInterval time.Duration // Default: 1 second
 
+    // How often to sync stats to database
+    StatsPeriod time.Duration // Default: 30 seconds
+
     // Inbox buffer size
-    InboxBufferSize int // Default: 1000
+    InboxBufferSize int // Default: 10000
+
+    // Timeout for sending to inbox
+    InboxSendTimeout time.Duration // Default: 5 seconds
+
+    // Maximum buffered job run updates before stopping
+    MaxBufferedJobRunUpdates int // Default: 100000
+
+    // Syncer channel buffer sizes
+    JobRunSyncerBufferSize int // Default: 1000
+    StatsSyncerBufferSize  int // Default: 100
 }
 ```
 
@@ -50,46 +64,130 @@ type SchedulerConfig struct {
 - `IndexRebuildInterval < LookaheadWindow` (required)
 - `GracePeriod > LoopInterval` (recommended)
 - `PreScheduleInterval >= LoopInterval` (recommended)
+- `StatsPeriod >= LoopInterval` (required)
 
 ### Defaults
 ```go
 func DefaultSchedulerConfig() SchedulerConfig {
     return SchedulerConfig{
-        PreScheduleInterval:  10 * time.Second,
-        IndexRebuildInterval: 1 * time.Minute,
-        LookaheadWindow:      10 * time.Minute,
-        GracePeriod:          30 * time.Second,
-        LoopInterval:         1 * time.Second,
-        InboxBufferSize:      1000,
+        PreScheduleInterval:      10 * time.Second,
+        IndexRebuildInterval:     1 * time.Minute,
+        LookaheadWindow:          10 * time.Minute,
+        GracePeriod:              30 * time.Second,
+        LoopInterval:             1 * time.Second,
+        StatsPeriod:              30 * time.Second,
+        InboxBufferSize:          10000,
+        InboxSendTimeout:         5 * time.Second,
+        MaxBufferedJobRunUpdates: 100000,
+        JobRunSyncerBufferSize:   1000,
+        StatsSyncerBufferSize:    100,
     }
 }
 ```
 
 ## Data Structures
 
+### Inbox Type
+```go
+// Inbox provides a typed interface for the scheduler's message channel
+type Inbox struct {
+    ch      chan InboxMessage
+    timeout time.Duration
+    logger  *slog.Logger
+    stats   *InboxStats
+}
+
+type InboxStats struct {
+    TotalSent         int64
+    TotalReceived     int64
+    TimeoutCount      int64
+    CurrentDepth      int
+    MaxDepthSeen      int
+}
+
+func NewInbox(bufferSize int, timeout time.Duration, logger *slog.Logger) *Inbox {
+    return &Inbox{
+        ch:      make(chan InboxMessage, bufferSize),
+        timeout: timeout,
+        logger:  logger,
+        stats:   &InboxStats{},
+    }
+}
+
+// Send sends a message with timeout, logging on timeout
+func (ib *Inbox) Send(msg InboxMessage) bool {
+    select {
+    case ib.ch <- msg:
+        atomic.AddInt64(&ib.stats.TotalSent, 1)
+        return true
+    case <-time.After(ib.timeout):
+        atomic.AddInt64(&ib.stats.TimeoutCount, 1)
+        ib.logger.Warn("inbox send timeout",
+            "msg_type", msg.Type,
+            "timeout", ib.timeout,
+            "current_depth", len(ib.ch))
+        return false
+    }
+}
+
+// TryReceive attempts to receive a message without blocking
+func (ib *Inbox) TryReceive() (InboxMessage, bool) {
+    select {
+    case msg := <-ib.ch:
+        atomic.AddInt64(&ib.stats.TotalReceived, 1)
+        return msg, true
+    default:
+        return InboxMessage{}, false
+    }
+}
+
+// Receive blocks until a message is available
+func (ib *Inbox) Receive() InboxMessage {
+    msg := <-ib.ch
+    atomic.AddInt64(&ib.stats.TotalReceived, 1)
+    return msg
+}
+
+// UpdateDepthStats updates depth statistics
+func (ib *Inbox) UpdateDepthStats() {
+    depth := len(ib.ch)
+    ib.stats.CurrentDepth = depth
+    if depth > ib.stats.MaxDepthSeen {
+        ib.stats.MaxDepthSeen = depth
+    }
+}
+
+// Stats returns current inbox statistics
+func (ib *Inbox) Stats() InboxStats {
+    return *ib.stats
+}
+```
+
 ### Main Scheduler Type
 ```go
 type Scheduler struct {
     // Configuration
     config SchedulerConfig
+    logger *slog.Logger
 
     // State
-    jobDefinitions  map[string]*Job           // jobID → Job
-    index           *index.ScheduledRunIndex
+    index               *index.ScheduledRunIndex
     activeOrchestrators map[string]*OrchestratorState // runID → state
-    lastRebuildTime time.Time
-    stats           SchedulerStats
+    statsBuffer         []SchedulerIterationStats     // Buffered stats
+    jobRunUpdateBuffer  []JobRunUpdate                // Buffered job run updates
+    lastStatsSyncTime   time.Time
 
     // Communication channels
-    inbox      chan InboxMessage
-    shutdown   chan struct{}
+    inbox    *Inbox
+    shutdown chan struct{}
 
-    // Syncer channels (for database writes)
-    jobRunSyncer chan JobRunUpdate
-    statsSyncer  chan StatsUpdate
+    // Syncer channels (for database writes with confirmations)
+    jobRunSyncer        chan JobRunUpdate
+    jobRunConfirmations chan JobRunUpdateConfirmation
+    statsSyncer         chan StatsUpdate
 
-    // For tracking what needs rebuilding
-    needsRebuild bool
+    // Index builder notification
+    rebuildIndexChan chan struct{}
 }
 ```
 
@@ -98,29 +196,51 @@ type Scheduler struct {
 type OrchestratorState struct {
     RunID        string
     JobID        string
+    JobConfig    *Job // Current job configuration
     ScheduledAt  time.Time
     ActualStart  time.Time
     Status       OrchestratorStatus
     CancelChan   chan struct{}
-    CompletedAt  time.Time // Set when orchestrator completes
+    ConfigUpdate chan *Job // For updating config while in PreRun
+    CompletedAt  time.Time
 }
 
 type OrchestratorStatus int
 
 const (
-    OrchestratorPending OrchestratorStatus = iota
-    OrchestratorRunning
-    OrchestratorCompleted
-    OrchestratorFailed
-    OrchestratorCancelled
+    OrchestratorPreRun OrchestratorStatus = iota // Created, waiting for start time
+    OrchestratorPending                          // Pre-execution checks
+    OrchestratorRunning                          // Job executing
+    OrchestratorCompleted                        // Completed successfully
+    OrchestratorFailed                           // Failed
+    OrchestratorCancelled                        // Cancelled
 )
+
+func (s OrchestratorStatus) String() string {
+    switch s {
+    case OrchestratorPreRun:
+        return "prerun"
+    case OrchestratorPending:
+        return "pending"
+    case OrchestratorRunning:
+        return "running"
+    case OrchestratorCompleted:
+        return "completed"
+    case OrchestratorFailed:
+        return "failed"
+    case OrchestratorCancelled:
+        return "cancelled"
+    default:
+        return "unknown"
+    }
+}
 ```
 
 ### Inbox Messages
 ```go
 type InboxMessage struct {
-    Type MessageType
-    Data interface{}
+    Type         MessageType
+    Data         interface{}
     ResponseChan chan<- interface{} // Optional, for request/response
 }
 
@@ -128,28 +248,57 @@ type MessageType int
 
 const (
     // From orchestrators
-    MsgOrchestratorComplete MessageType = iota
+    MsgOrchestratorStateChange MessageType = iota // Generic state change
+    MsgOrchestratorComplete
     MsgOrchestratorFailed
 
     // From watcher
     MsgCancelRun
-    MsgScheduleUpdated
-    MsgJobAdded
-    MsgJobRemoved
-    MsgJobModified
+    MsgUpdateRunConfig // Update config while in PreRun
 
     // State queries
     MsgGetOrchestratorState
     MsgGetAllActiveRuns
-    MsgGetJobStatus
+    MsgGetStats
 
     // Control
     MsgShutdown
 )
+
+func (m MessageType) String() string {
+    switch m {
+    case MsgOrchestratorStateChange:
+        return "orchestrator_state_change"
+    case MsgOrchestratorComplete:
+        return "orchestrator_complete"
+    case MsgOrchestratorFailed:
+        return "orchestrator_failed"
+    case MsgCancelRun:
+        return "cancel_run"
+    case MsgUpdateRunConfig:
+        return "update_run_config"
+    case MsgGetOrchestratorState:
+        return "get_orchestrator_state"
+    case MsgGetAllActiveRuns:
+        return "get_all_active_runs"
+    case MsgGetStats:
+        return "get_stats"
+    case MsgShutdown:
+        return "shutdown"
+    default:
+        return "unknown"
+    }
+}
 ```
 
 ### Specific Message Payloads
 ```go
+type OrchestratorStateChangeMsg struct {
+    RunID     string
+    NewStatus OrchestratorStatus
+    Timestamp time.Time
+}
+
 type OrchestratorCompleteMsg struct {
     RunID       string
     Success     bool
@@ -161,23 +310,203 @@ type CancelRunMsg struct {
     RunID string
 }
 
-type ScheduleUpdatedMsg struct {
-    // Empty - just signals rebuild needed
-}
-
-type JobModifiedMsg struct {
-    JobID string
-    Job   *Job
+type UpdateRunConfigMsg struct {
+    RunID     string
+    NewConfig *Job
 }
 
 type GetOrchestratorStateMsg struct {
     RunID string
 }
 
-// Response sent via ResponseChan
 type OrchestratorStateResponse struct {
     State *OrchestratorState
     Found bool
+}
+
+type GetAllActiveRunsMsg struct {
+    // Empty
+}
+
+type AllActiveRunsResponse struct {
+    Runs []*OrchestratorState
+}
+
+type GetStatsMsg struct {
+    // Empty
+}
+
+type StatsResponse struct {
+    SchedulerStats SchedulerStats
+    InboxStats     InboxStats
+}
+```
+
+### Job Run Update Tracking
+```go
+type JobRunUpdate struct {
+    UpdateID    string // UUID for tracking confirmation
+    RunID       string
+    JobID       string
+    ScheduledAt time.Time
+    CompletedAt time.Time
+    Status      string
+    Success     bool
+    Error       error
+}
+
+type JobRunUpdateConfirmation struct {
+    UpdateID string
+    Success  bool
+    Error    error
+}
+```
+
+### Statistics
+```go
+type SchedulerIterationStats struct {
+    Timestamp               time.Time
+    IterationDuration       time.Duration
+    ActiveOrchestratorCount int
+    IndexSize               int
+    InboxDepth              int
+    MessagesProcessed       int
+}
+
+type SchedulerStats struct {
+    Iterations              []SchedulerIterationStats
+    TotalIterations         int64
+    BufferedJobRunUpdates   int
+    FailedJobRunUpdatesSent int64
+}
+
+type StatsUpdate struct {
+    Stats []SchedulerIterationStats
+}
+```
+
+## Background Goroutines
+
+### Index Builder
+The index builder runs independently and rebuilds the index periodically.
+
+```go
+func (s *Scheduler) runIndexBuilder(db *sql.DB) {
+    ticker := time.NewTicker(s.config.IndexRebuildInterval)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-s.shutdown:
+            return
+
+        case <-ticker.C:
+            s.performIndexRebuild(db)
+
+        case <-s.rebuildIndexChan:
+            // Explicit rebuild requested (e.g., schedule change)
+            s.performIndexRebuild(db)
+        }
+    }
+}
+
+func (s *Scheduler) performIndexRebuild(db *sql.DB) {
+    now := time.Now()
+    start := now.Add(-s.config.GracePeriod)
+    end := now.Add(s.config.LookaheadWindow)
+
+    s.logger.Info("starting index rebuild",
+        "start", start,
+        "end", end)
+
+    // 1. Query database for all job definitions
+    jobs, err := queryJobDefinitions(db)
+    if err != nil {
+        s.logger.Error("failed to query job definitions",
+            "error", err)
+        return
+    }
+
+    // 2. Generate scheduled runs
+    runs := []index.ScheduledRun{}
+    for _, job := range jobs {
+        schedule, err := cron.Parse(job.Schedule)
+        if err != nil {
+            s.logger.Warn("failed to parse cron schedule",
+                "job_id", job.ID,
+                "schedule", job.Schedule,
+                "error", err)
+            continue
+        }
+
+        times := schedule.Between(start, end)
+        for _, t := range times {
+            runs = append(runs, index.ScheduledRun{
+                JobID:       job.ID,
+                ScheduledAt: t,
+            })
+        }
+    }
+
+    // 3. Atomically swap index (lock-free!)
+    s.index.Swap(runs)
+
+    s.logger.Info("index rebuild complete",
+        "run_count", len(runs),
+        "job_count", len(jobs),
+        "duration", time.Since(now))
+}
+
+func queryJobDefinitions(db *sql.DB) ([]*Job, error) {
+    // TODO: Actual DB query
+    // For now, return empty slice
+    return []*Job{}, nil
+}
+```
+
+### Job Run Syncer with Confirmations
+```go
+func (s *Scheduler) runJobRunSyncer(db *sql.DB) {
+    for update := range s.jobRunSyncer {
+        err := writeJobRunUpdate(db, update)
+
+        confirmation := JobRunUpdateConfirmation{
+            UpdateID: update.UpdateID,
+            Success:  err == nil,
+            Error:    err,
+        }
+
+        // Send confirmation (non-blocking)
+        select {
+        case s.jobRunConfirmations <- confirmation:
+        default:
+            s.logger.Warn("failed to send job run confirmation",
+                "update_id", update.UpdateID)
+        }
+    }
+}
+
+func writeJobRunUpdate(db *sql.DB, update JobRunUpdate) error {
+    // TODO: Actual database write
+    return nil
+}
+```
+
+### Stats Syncer
+```go
+func (s *Scheduler) runStatsSyncer(db *sql.DB) {
+    for update := range s.statsSyncer {
+        err := writeStatsUpdate(db, update)
+        if err != nil {
+            // Just log, stats writes are not critical
+            slog.Error("failed to write stats update", "error", err)
+        }
+    }
+}
+
+func writeStatsUpdate(db *sql.DB, update StatsUpdate) error {
+    // TODO: Actual database write
+    return nil
 }
 ```
 
@@ -185,37 +514,61 @@ type OrchestratorStateResponse struct {
 
 ### Initialization
 ```go
-func NewScheduler(config SchedulerConfig, jobs []*Job) (*Scheduler, error) {
+func NewScheduler(config SchedulerConfig, db *sql.DB, logger *slog.Logger) (*Scheduler, error) {
     // 1. Validate configuration
     if err := validateConfig(config); err != nil {
         return nil, err
     }
 
-    // 2. Build job definitions map
-    jobDefs := make(map[string]*Job)
-    for _, job := range jobs {
-        jobDefs[job.ID] = job
-    }
+    // 2. Create inbox
+    inbox := NewInbox(config.InboxBufferSize, config.InboxSendTimeout, logger)
 
-    // 3. Build initial index
+    // 3. Build initial index (synchronously on startup)
     now := time.Now()
     start := now.Add(-config.GracePeriod)
     end := now.Add(config.LookaheadWindow)
-    runs := generateScheduledRuns(jobs, start, end)
+
+    jobs, err := queryJobDefinitions(db)
+    if err != nil {
+        return nil, fmt.Errorf("failed to query jobs on startup: %w", err)
+    }
+
+    runs := []index.ScheduledRun{}
+    for _, job := range jobs {
+        schedule, err := cron.Parse(job.Schedule)
+        if err != nil {
+            logger.Warn("failed to parse cron schedule on startup",
+                "job_id", job.ID,
+                "error", err)
+            continue
+        }
+
+        times := schedule.Between(start, end)
+        for _, t := range times {
+            runs = append(runs, index.ScheduledRun{
+                JobID:       job.ID,
+                ScheduledAt: t,
+            })
+        }
+    }
+
     idx := index.NewScheduledRunIndex(runs)
 
     // 4. Initialize scheduler
     s := &Scheduler{
-        config:              config,
-        jobDefinitions:      jobDefs,
-        index:               idx,
-        activeOrchestrators: make(map[string]*OrchestratorState),
-        lastRebuildTime:     now,
-        inbox:               make(chan InboxMessage, config.InboxBufferSize),
-        shutdown:            make(chan struct{}),
-        jobRunSyncer:        make(chan JobRunUpdate, 100),
-        statsSyncer:         make(chan StatsUpdate, 100),
-        needsRebuild:        false,
+        config:                config,
+        logger:                logger,
+        index:                 idx,
+        activeOrchestrators:   make(map[string]*OrchestratorState),
+        statsBuffer:           make([]SchedulerIterationStats, 0),
+        jobRunUpdateBuffer:    make([]JobRunUpdate, 0),
+        lastStatsSyncTime:     now,
+        inbox:                 inbox,
+        shutdown:              make(chan struct{}),
+        jobRunSyncer:          make(chan JobRunUpdate, config.JobRunSyncerBufferSize),
+        jobRunConfirmations:   make(chan JobRunUpdateConfirmation, config.JobRunSyncerBufferSize),
+        statsSyncer:           make(chan StatsUpdate, config.StatsSyncerBufferSize),
+        rebuildIndexChan:      make(chan struct{}, 1),
     }
 
     return s, nil
@@ -224,10 +577,14 @@ func NewScheduler(config SchedulerConfig, jobs []*Job) (*Scheduler, error) {
 
 ### Starting the Scheduler
 ```go
-func (s *Scheduler) Start() {
-    // Launch syncer goroutines
-    go s.runJobRunSyncer()
-    go s.runStatsSyncer()
+func (s *Scheduler) Start(db *sql.DB) {
+    s.logger.Info("starting scheduler")
+
+    // Launch background goroutines
+    go s.runIndexBuilder(db)
+    go s.runJobRunSyncer(db)
+    go s.runStatsSyncer(db)
+    go s.processJobRunConfirmations()
 
     // Start main loop
     s.run()
@@ -258,83 +615,31 @@ func (s *Scheduler) run() {
 ### Single Iteration
 ```go
 func (s *Scheduler) iteration() {
-    now := time.Now()
+    start := time.Now()
 
-    // Step 1: Rebuild index if needed
-    if s.shouldRebuildIndex(now) {
-        s.rebuildIndex(now)
-    }
+    // Step 1: Schedule new orchestrators
+    s.scheduleOrchestrators(start)
 
-    // Step 2: Schedule new orchestrators
-    s.scheduleOrchestrators(now)
+    // Step 2: Process ALL inbox messages
+    messagesProcessed := s.processInbox()
 
-    // Step 3: Process ALL inbox messages
-    s.processInbox()
+    // Step 3: Clean up completed orchestrators
+    s.cleanupOrchestrators(start)
 
-    // Step 4: Clean up completed orchestrators
-    s.cleanupOrchestrators(now)
+    // Step 4: Sync stats if needed
+    s.maybeSyncStats(start)
 
-    // Step 5: Update statistics
-    s.updateStats(now)
+    // Step 5: Record iteration statistics
+    s.recordIterationStats(start, messagesProcessed)
+
+    // Step 6: Update inbox depth stats
+    s.inbox.UpdateDepthStats()
 }
 ```
 
 ## Detailed Step Implementations
 
-### Step 1: Rebuild Index
-```go
-func (s *Scheduler) shouldRebuildIndex(now time.Time) bool {
-    if s.needsRebuild {
-        return true
-    }
-    return now.Sub(s.lastRebuildTime) >= s.config.IndexRebuildInterval
-}
-
-func (s *Scheduler) rebuildIndex(now time.Time) {
-    // Calculate window
-    start := now.Add(-s.config.GracePeriod)
-    end := now.Add(s.config.LookaheadWindow)
-
-    // Generate runs from all jobs (no I/O, uses in-memory jobDefinitions)
-    jobs := make([]*Job, 0, len(s.jobDefinitions))
-    for _, job := range s.jobDefinitions {
-        jobs = append(jobs, job)
-    }
-
-    runs := generateScheduledRuns(jobs, start, end)
-
-    // Atomically swap index
-    s.index.Swap(runs)
-
-    // Update state
-    s.lastRebuildTime = now
-    s.needsRebuild = false
-}
-
-func generateScheduledRuns(jobs []*Job, start, end time.Time) []index.ScheduledRun {
-    runs := []index.ScheduledRun{}
-
-    for _, job := range jobs {
-        schedule, err := cron.Parse(job.Schedule)
-        if err != nil {
-            // Log error, skip this job
-            continue
-        }
-
-        times := schedule.Between(start, end)
-        for _, t := range times {
-            runs = append(runs, index.ScheduledRun{
-                JobID:       job.ID,
-                ScheduledAt: t,
-            })
-        }
-    }
-
-    return runs
-}
-```
-
-### Step 2: Schedule Orchestrators
+### Step 1: Schedule Orchestrators
 ```go
 func (s *Scheduler) scheduleOrchestrators(now time.Time) {
     // Query for jobs to schedule in the next PRE_SCHEDULE_INTERVAL
@@ -344,92 +649,122 @@ func (s *Scheduler) scheduleOrchestrators(now time.Time) {
     runs := s.index.Query(start, end)
 
     for _, run := range runs {
-        // Generate unique runID
-        runID := generateRunID(run.JobID, run.ScheduledAt)
+        // Generate unique runID using UUID
+        runID := generateRunID()
 
         // Check if already scheduled
         if _, exists := s.activeOrchestrators[runID]; exists {
             continue
         }
 
-        // Get job definition
-        job, exists := s.jobDefinitions[run.JobID]
-        if !exists {
-            // Job was deleted, skip
-            continue
-        }
+        // Note: We don't have job config here - orchestrator will request it
+        // or we need to maintain a job cache in the scheduler
+        // For now, create a placeholder
 
         // Create orchestrator state
         cancelChan := make(chan struct{})
+        configUpdateChan := make(chan *Job, 1)
+
         state := &OrchestratorState{
-            RunID:       runID,
-            JobID:       run.JobID,
-            ScheduledAt: run.ScheduledAt,
-            ActualStart: time.Time{}, // Not started yet
-            Status:      OrchestratorPending,
-            CancelChan:  cancelChan,
+            RunID:        runID,
+            JobID:        run.JobID,
+            JobConfig:    nil, // Will be set when orchestrator starts
+            ScheduledAt:  run.ScheduledAt,
+            ActualStart:  time.Time{},
+            Status:       OrchestratorPreRun,
+            CancelChan:   cancelChan,
+            ConfigUpdate: configUpdateChan,
         }
 
         // Record in active orchestrators
         s.activeOrchestrators[runID] = state
 
         // Launch orchestrator goroutine
-        go s.runOrchestrator(job, run.ScheduledAt, runID, cancelChan)
+        go s.runOrchestrator(run.JobID, run.ScheduledAt, runID, cancelChan, configUpdateChan)
 
-        // Send update to syncer
-        s.jobRunSyncer <- JobRunUpdate{
+        // Buffer job run update
+        s.bufferJobRunUpdate(JobRunUpdate{
+            UpdateID:    generateUpdateID(),
             RunID:       runID,
             JobID:       run.JobID,
             ScheduledAt: run.ScheduledAt,
-            Status:      "pending",
-        }
+            Status:      OrchestratorPreRun.String(),
+        })
     }
 }
 
-func generateRunID(jobID string, scheduledAt time.Time) string {
-    // Format: jobID + timestamp in RFC3339Nano for uniqueness
-    return fmt.Sprintf("%s_%s", jobID, scheduledAt.Format(time.RFC3339Nano))
+func generateRunID() string {
+    // Use UUID for uniqueness
+    return uuid.New().String()
+}
+
+func generateUpdateID() string {
+    return uuid.New().String()
 }
 ```
 
-### Step 3: Process Inbox
+### Step 2: Process Inbox
 ```go
-func (s *Scheduler) processInbox() {
+func (s *Scheduler) processInbox() int {
+    messagesProcessed := 0
+
     // Process all available messages (non-blocking)
     for {
-        select {
-        case msg := <-s.inbox:
-            s.handleMessage(msg)
-        default:
-            // No more messages, continue
-            return
+        msg, ok := s.inbox.TryReceive()
+        if !ok {
+            break
         }
+
+        s.handleMessage(msg)
+        messagesProcessed++
     }
+
+    return messagesProcessed
 }
 
 func (s *Scheduler) handleMessage(msg InboxMessage) {
+    s.logger.Debug("handling message", "type", msg.Type.String())
+
     switch msg.Type {
+    case MsgOrchestratorStateChange:
+        s.handleOrchestratorStateChange(msg)
     case MsgOrchestratorComplete:
         s.handleOrchestratorComplete(msg)
     case MsgOrchestratorFailed:
         s.handleOrchestratorFailed(msg)
     case MsgCancelRun:
         s.handleCancelRun(msg)
-    case MsgScheduleUpdated:
-        s.handleScheduleUpdated(msg)
-    case MsgJobAdded:
-        s.handleJobAdded(msg)
-    case MsgJobRemoved:
-        s.handleJobRemoved(msg)
-    case MsgJobModified:
-        s.handleJobModified(msg)
+    case MsgUpdateRunConfig:
+        s.handleUpdateRunConfig(msg)
     case MsgGetOrchestratorState:
         s.handleGetOrchestratorState(msg)
     case MsgGetAllActiveRuns:
         s.handleGetAllActiveRuns(msg)
+    case MsgGetStats:
+        s.handleGetStats(msg)
     case MsgShutdown:
         close(s.shutdown)
+    default:
+        s.logger.Warn("unknown message type", "type", msg.Type)
     }
+}
+
+func (s *Scheduler) handleOrchestratorStateChange(msg InboxMessage) {
+    data := msg.Data.(OrchestratorStateChangeMsg)
+
+    state, exists := s.activeOrchestrators[data.RunID]
+    if !exists {
+        return
+    }
+
+    state.Status = data.NewStatus
+
+    // Buffer update
+    s.bufferJobRunUpdate(JobRunUpdate{
+        UpdateID: generateUpdateID(),
+        RunID:    data.RunID,
+        Status:   data.NewStatus.String(),
+    })
 }
 
 func (s *Scheduler) handleOrchestratorComplete(msg InboxMessage) {
@@ -440,18 +775,40 @@ func (s *Scheduler) handleOrchestratorComplete(msg InboxMessage) {
         return
     }
 
-    // Update state
     state.Status = OrchestratorCompleted
     state.CompletedAt = data.CompletedAt
 
-    // Send to syncer
-    s.jobRunSyncer <- JobRunUpdate{
+    // Buffer update
+    s.bufferJobRunUpdate(JobRunUpdate{
+        UpdateID:    generateUpdateID(),
         RunID:       data.RunID,
         CompletedAt: data.CompletedAt,
-        Status:      "completed",
+        Status:      OrchestratorCompleted.String(),
         Success:     data.Success,
         Error:       data.Error,
+    })
+}
+
+func (s *Scheduler) handleOrchestratorFailed(msg InboxMessage) {
+    data := msg.Data.(OrchestratorCompleteMsg)
+
+    state, exists := s.activeOrchestrators[data.RunID]
+    if !exists {
+        return
     }
+
+    state.Status = OrchestratorFailed
+    state.CompletedAt = data.CompletedAt
+
+    // Buffer update
+    s.bufferJobRunUpdate(JobRunUpdate{
+        UpdateID:    generateUpdateID(),
+        RunID:       data.RunID,
+        CompletedAt: data.CompletedAt,
+        Status:      OrchestratorFailed.String(),
+        Success:     false,
+        Error:       data.Error,
+    })
 }
 
 func (s *Scheduler) handleCancelRun(msg InboxMessage) {
@@ -459,27 +816,46 @@ func (s *Scheduler) handleCancelRun(msg InboxMessage) {
 
     state, exists := s.activeOrchestrators[data.RunID]
     if !exists {
+        s.logger.Warn("attempted to cancel non-existent run", "run_id", data.RunID)
         return
     }
 
     // Signal cancellation to orchestrator
     close(state.CancelChan)
     state.Status = OrchestratorCancelled
+
+    s.logger.Info("cancelled run", "run_id", data.RunID)
 }
 
-func (s *Scheduler) handleScheduleUpdated(msg InboxMessage) {
-    // Mark that we need to rebuild on next iteration
-    s.needsRebuild = true
-}
+func (s *Scheduler) handleUpdateRunConfig(msg InboxMessage) {
+    data := msg.Data.(UpdateRunConfigMsg)
 
-func (s *Scheduler) handleJobModified(msg InboxMessage) {
-    data := msg.Data.(JobModifiedMsg)
+    state, exists := s.activeOrchestrators[data.RunID]
+    if !exists {
+        s.logger.Warn("attempted to update config for non-existent run",
+            "run_id", data.RunID)
+        return
+    }
 
-    // Update in-memory job definition
-    s.jobDefinitions[data.JobID] = data.Job
+    // Can only update config in PreRun state
+    if state.Status != OrchestratorPreRun {
+        s.logger.Warn("attempted to update config for run not in PreRun state",
+            "run_id", data.RunID,
+            "status", state.Status.String())
+        return
+    }
 
-    // Mark for rebuild
-    s.needsRebuild = true
+    // Send new config to orchestrator
+    select {
+    case state.ConfigUpdate <- data.NewConfig:
+        state.JobConfig = data.NewConfig
+        s.logger.Info("updated run config",
+            "run_id", data.RunID,
+            "job_id", data.NewConfig.ID)
+    default:
+        s.logger.Warn("failed to send config update to orchestrator",
+            "run_id", data.RunID)
+    }
 }
 
 func (s *Scheduler) handleGetOrchestratorState(msg InboxMessage) {
@@ -492,14 +868,39 @@ func (s *Scheduler) handleGetOrchestratorState(msg InboxMessage) {
         Found: found,
     }
 
-    // Send response back
+    if msg.ResponseChan != nil {
+        msg.ResponseChan <- response
+    }
+}
+
+func (s *Scheduler) handleGetAllActiveRuns(msg InboxMessage) {
+    runs := make([]*OrchestratorState, 0, len(s.activeOrchestrators))
+    for _, state := range s.activeOrchestrators {
+        runs = append(runs, state)
+    }
+
+    response := AllActiveRunsResponse{
+        Runs: runs,
+    }
+
+    if msg.ResponseChan != nil {
+        msg.ResponseChan <- response
+    }
+}
+
+func (s *Scheduler) handleGetStats(msg InboxMessage) {
+    response := StatsResponse{
+        SchedulerStats: s.getSchedulerStats(),
+        InboxStats:     s.inbox.Stats(),
+    }
+
     if msg.ResponseChan != nil {
         msg.ResponseChan <- response
     }
 }
 ```
 
-### Step 4: Cleanup Orchestrators
+### Step 3: Cleanup Orchestrators
 ```go
 func (s *Scheduler) cleanupOrchestrators(now time.Time) {
     toDelete := []string{}
@@ -522,61 +923,168 @@ func (s *Scheduler) cleanupOrchestrators(now time.Time) {
     for _, runID := range toDelete {
         delete(s.activeOrchestrators, runID)
     }
+
+    if len(toDelete) > 0 {
+        s.logger.Debug("cleaned up orchestrators", "count", len(toDelete))
+    }
 }
 ```
 
-### Step 5: Update Statistics
+### Step 4: Sync Stats
 ```go
-func (s *Scheduler) updateStats(now time.Time) {
-    s.stats.LastIterationTime = now
-    s.stats.ActiveOrchestratorCount = len(s.activeOrchestrators)
-    s.stats.IndexSize = s.index.Len()
+func (s *Scheduler) maybeSyncStats(now time.Time) {
+    if now.Sub(s.lastStatsSyncTime) < s.config.StatsPeriod {
+        return
+    }
 
-    // Send to stats syncer (non-blocking)
+    if len(s.statsBuffer) == 0 {
+        return
+    }
+
+    // Send buffered stats to syncer
+    update := StatsUpdate{
+        Stats: s.statsBuffer,
+    }
+
     select {
-    case s.statsSyncer <- StatsUpdate{
-        Timestamp:               now,
-        ActiveOrchestratorCount: s.stats.ActiveOrchestratorCount,
-        IndexSize:               s.stats.IndexSize,
-    }:
+    case s.statsSyncer <- update:
+        s.statsBuffer = make([]SchedulerIterationStats, 0)
+        s.lastStatsSyncTime = now
+        s.logger.Debug("synced stats", "count", len(update.Stats))
     default:
-        // Syncer is backed up, skip this update
+        s.logger.Warn("stats syncer channel full, skipping sync")
+    }
+}
+```
+
+### Step 5: Record Iteration Stats
+```go
+func (s *Scheduler) recordIterationStats(start time.Time, messagesProcessed int) {
+    stats := SchedulerIterationStats{
+        Timestamp:               start,
+        IterationDuration:       time.Since(start),
+        ActiveOrchestratorCount: len(s.activeOrchestrators),
+        IndexSize:               s.index.Len(),
+        InboxDepth:              s.inbox.Stats().CurrentDepth,
+        MessagesProcessed:       messagesProcessed,
+    }
+
+    s.statsBuffer = append(s.statsBuffer, stats)
+}
+
+func (s *Scheduler) getSchedulerStats() SchedulerStats {
+    return SchedulerStats{
+        Iterations:              s.statsBuffer,
+        TotalIterations:         int64(len(s.statsBuffer)),
+        BufferedJobRunUpdates:   len(s.jobRunUpdateBuffer),
+        FailedJobRunUpdatesSent: 0, // TODO: track this
+    }
+}
+```
+
+### Job Run Update Buffering
+```go
+func (s *Scheduler) bufferJobRunUpdate(update JobRunUpdate) {
+    s.jobRunUpdateBuffer = append(s.jobRunUpdateBuffer, update)
+
+    // Check if we should send updates
+    if len(s.jobRunUpdateBuffer) >= s.config.JobRunSyncerBufferSize/2 {
+        s.flushJobRunUpdates()
+    }
+
+    // Check if buffer is too large
+    if len(s.jobRunUpdateBuffer) > s.config.MaxBufferedJobRunUpdates {
+        s.logger.Error("job run update buffer exceeded maximum size, stopping scheduler",
+            "buffer_size", len(s.jobRunUpdateBuffer),
+            "max_size", s.config.MaxBufferedJobRunUpdates)
+        close(s.shutdown)
+    }
+}
+
+func (s *Scheduler) flushJobRunUpdates() {
+    for _, update := range s.jobRunUpdateBuffer {
+        select {
+        case s.jobRunSyncer <- update:
+            // Sent successfully
+        default:
+            s.logger.Warn("job run syncer channel full",
+                "buffered", len(s.jobRunUpdateBuffer))
+            // Keep in buffer, will retry
+            return
+        }
+    }
+
+    // All sent, clear buffer
+    s.jobRunUpdateBuffer = make([]JobRunUpdate, 0)
+}
+
+func (s *Scheduler) processJobRunConfirmations() {
+    for confirmation := range s.jobRunConfirmations {
+        if !confirmation.Success {
+            s.logger.Error("job run update failed",
+                "update_id", confirmation.UpdateID,
+                "error", confirmation.Error)
+            // Update is lost - we don't re-add to buffer
+            // This is a design choice - could implement retry logic
+        }
     }
 }
 ```
 
 ## Orchestrator Stub
 
-For now, the orchestrator is a placeholder that will be fully implemented later:
-
 ```go
-func (s *Scheduler) runOrchestrator(job *Job, scheduledAt time.Time, runID string, cancelChan chan struct{}) {
-    // Wait until scheduled time
+func (s *Scheduler) runOrchestrator(jobID string, scheduledAt time.Time, runID string,
+                                    cancelChan chan struct{}, configUpdate chan *Job) {
+
+    // PreRun state: wait for scheduled time or config updates
     waitDuration := time.Until(scheduledAt)
     if waitDuration > 0 {
-        select {
-        case <-time.After(waitDuration):
-            // Time to start
-        case <-cancelChan:
-            // Cancelled before start
-            s.inbox <- InboxMessage{
-                Type: MsgOrchestratorComplete,
-                Data: OrchestratorCompleteMsg{
-                    RunID:       runID,
-                    Success:     false,
-                    CompletedAt: time.Now(),
-                    Error:       errors.New("cancelled"),
-                },
+        for {
+            select {
+            case <-time.After(waitDuration):
+                // Time to start
+                goto START
+
+            case newConfig := <-configUpdate:
+                // Config updated while waiting
+                s.logger.Info("received config update in PreRun",
+                    "run_id", runID,
+                    "job_id", newConfig.ID)
+                // Continue waiting with updated config
+
+            case <-cancelChan:
+                // Cancelled before start
+                s.inbox.Send(InboxMessage{
+                    Type: MsgOrchestratorComplete,
+                    Data: OrchestratorCompleteMsg{
+                        RunID:       runID,
+                        Success:     false,
+                        CompletedAt: time.Now(),
+                        Error:       errors.New("cancelled in PreRun"),
+                    },
+                })
+                return
             }
-            return
         }
     }
+
+START:
+    // Notify state change to Pending
+    s.inbox.Send(InboxMessage{
+        Type: MsgOrchestratorStateChange,
+        Data: OrchestratorStateChangeMsg{
+            RunID:     runID,
+            NewStatus: OrchestratorPending,
+            Timestamp: time.Now(),
+        },
+    })
 
     // TODO: Actual orchestrator implementation
     // For now, just simulate completion
     time.Sleep(100 * time.Millisecond)
 
-    s.inbox <- InboxMessage{
+    s.inbox.Send(InboxMessage{
         Type: MsgOrchestratorComplete,
         Data: OrchestratorCompleteMsg{
             RunID:       runID,
@@ -584,7 +1092,7 @@ func (s *Scheduler) runOrchestrator(job *Job, scheduledAt time.Time, runID strin
             CompletedAt: time.Now(),
             Error:       nil,
         },
-    }
+    })
 }
 ```
 
@@ -592,61 +1100,33 @@ func (s *Scheduler) runOrchestrator(job *Job, scheduledAt time.Time, runID strin
 
 ```go
 func (s *Scheduler) handleShutdown() {
+    s.logger.Info("shutting down scheduler")
+
     // Cancel all active orchestrators
-    for _, state := range s.activeOrchestrators {
-        if state.Status == OrchestratorPending || state.Status == OrchestratorRunning {
+    for runID, state := range s.activeOrchestrators {
+        if state.Status == OrchestratorPreRun ||
+           state.Status == OrchestratorPending ||
+           state.Status == OrchestratorRunning {
             close(state.CancelChan)
+            s.logger.Debug("cancelled orchestrator", "run_id", runID)
         }
     }
+
+    // Flush any remaining job run updates
+    s.flushJobRunUpdates()
 
     // Close syncer channels
     close(s.jobRunSyncer)
     close(s.statsSyncer)
+    close(s.rebuildIndexChan)
 
-    // Wait for syncers to finish (implementation detail)
-    // ...
+    s.logger.Info("scheduler shutdown complete")
 }
 
 func (s *Scheduler) Shutdown() {
-    s.inbox <- InboxMessage{
+    s.inbox.Send(InboxMessage{
         Type: MsgShutdown,
-    }
-}
-```
-
-## Syncer Stubs
-
-These will be fully implemented later but need basic structure:
-
-```go
-type JobRunUpdate struct {
-    RunID       string
-    JobID       string
-    ScheduledAt time.Time
-    CompletedAt time.Time
-    Status      string
-    Success     bool
-    Error       error
-}
-
-type StatsUpdate struct {
-    Timestamp               time.Time
-    ActiveOrchestratorCount int
-    IndexSize               int
-}
-
-func (s *Scheduler) runJobRunSyncer() {
-    for update := range s.jobRunSyncer {
-        // TODO: Write to database
-        _ = update
-    }
-}
-
-func (s *Scheduler) runStatsSyncer() {
-    for update := range s.statsSyncer {
-        // TODO: Write to database
-        _ = update
-    }
+    })
 }
 ```
 
@@ -659,44 +1139,54 @@ func (s *Scheduler) runStatsSyncer() {
 ### Standard Library
 - `time` - Time operations
 - `fmt` - String formatting
-- `sync` - (only in syncers if needed)
+- `log/slog` - Structured logging
+- `database/sql` - Database interface
+- `sync/atomic` - Atomic operations for stats
 
 ### External
-- None for core scheduler (syncers may need database library later)
+- `github.com/google/uuid` - UUID generation for runIDs
 
 ## File Structure
 
 ```
 lib/scheduler/
 ├── config.go           # Configuration types and defaults
+├── inbox.go            # Inbox type with helper methods
 ├── scheduler.go        # Main Scheduler type and loop
 ├── messages.go         # Inbox message types
 ├── orchestrator.go     # Orchestrator state and stub implementation
-├── syncer.go          # Syncer stub implementations
-└── scheduler_test.go  # Tests (to be defined)
+├── indexbuilder.go     # Index builder background goroutine
+├── syncer.go           # Syncer implementations
+└── scheduler_test.go   # Tests (to be defined)
 ```
 
 ## Testing Strategy
 
 Will be defined in `scheduler-tests.md` but key areas:
-- Index rebuild timing and correctness
+- Index rebuild via background goroutine
 - Orchestrator scheduling and deduplication
 - Message handling and state queries
 - Cleanup timing (grace period)
 - Shutdown and cancellation
+- Config updates in PreRun state
+- Job run update buffering and confirmation
+- Stats buffering and syncing
+- Inbox timeout and depth tracking
 - Concurrent access (race detector)
 
-## Open Questions
+## Resolved Design Questions
 
-1. **RunID generation**: Is `jobID_timestamp` sufficient or do we need UUIDs?
-2. **Syncer error handling**: What happens if database writes fail?
-3. **Job definition reloading**: Should we periodically reload from DB or only on explicit updates?
-4. **Stats aggregation**: Should stats be per-iteration or aggregated over windows?
-5. **Inbox overflow**: What happens if inbox fills up? Drop messages? Block senders?
+1. **RunID generation**: Using UUIDs via `github.com/google/uuid`
+2. **Syncer error handling**: Buffered writes with confirmations. Main loop buffers updates and flushes periodically. Syncer confirms writes. If buffer exceeds maximum, scheduler stops.
+3. **Job definition reloading**: Index builder goroutine queries DB on `IndexRebuildInterval` cadence
+4. **Stats aggregation**: Recorded per-iteration, buffered, synced on `STATS_PERIOD`
+5. **Inbox overflow**: Senders block with timeout. Timeouts logged and tracked in stats. Inbox depth is configurable with large default (10,000).
 
 ## Future Enhancements
 
-- Metrics/observability hooks
+- Retry logic for failed job run updates
+- Metrics/observability hooks (Prometheus, etc.)
 - Configurable orchestrator pool limits
 - Advanced scheduling strategies (priority, backfill)
 - Multi-scheduler coordination (HA setup)
+- Dynamic configuration reloading
