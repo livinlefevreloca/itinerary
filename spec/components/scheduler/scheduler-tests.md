@@ -43,7 +43,7 @@ Test cases for validation logic:
 5. **Zero InboxBufferSize**: Returns error
 6. **Zero MaxBufferedJobRunUpdates**: Returns error
 7. **Negative OrchestratorHeartbeatInterval**: Returns error
-8. **Zero MaxMissedHeartbeats**: Returns error
+8. **Zero MaxMissedOrchestratorHeartbeats**: Returns error
 
 ## Inbox Tests
 
@@ -545,12 +545,12 @@ func TestScheduler_CheckHeartbeats_OneMissed(t *testing.T)
 ```go
 func TestScheduler_CheckHeartbeats_Orphaned(t *testing.T)
 ```
-- Create orchestrator with LastHeartbeat = now - 60 seconds
-- MissedHeartbeats = 4 (one more will trigger orphan)
-- MaxMissedHeartbeats = 5
+- Create orchestrator with LastHeartbeat = now - 40 seconds
+- MissedHeartbeats = 2 (one more will trigger orphan)
+- MaxMissedOrchestratorHeartbeats = 3
 - HeartbeatInterval = 10 seconds
 - Run checkHeartbeats(now)
-- MissedHeartbeats = 5
+- MissedHeartbeats = 3
 - Status = OrchestratorOrphaned
 - Error logged
 - JobRunUpdate buffered with orphaned status
@@ -791,7 +791,7 @@ func TestIntegration_MultipleJobsOverlapping(t *testing.T)
 ```go
 func TestIntegration_HeartbeatOrphaning(t *testing.T)
 ```
-- Start scheduler with MaxMissedHeartbeats = 2
+- Start scheduler with MaxMissedOrchestratorHeartbeats = 2
 - Create orchestrator
 - Mock orchestrator to stop sending heartbeats
 - Wait for 3 heartbeat intervals
