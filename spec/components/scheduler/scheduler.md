@@ -184,6 +184,7 @@ type Syncer struct {
 
     // Control
     shutdown chan struct{}
+    wg       sync.WaitGroup // Tracks all background goroutines
 }
 
 type SyncerConfig struct {
@@ -323,6 +324,8 @@ func (s *Syncer) GetStats() SyncerStats {
 
 // Start launches background goroutines for syncing
 func (s *Syncer) Start(db *sql.DB) {
+    s.wg.Add(5) // 5 goroutines total
+
     go s.runJobRunFlusher()
     go s.runStatsFlusher()
     go s.runJobRunSyncer(db)
@@ -332,12 +335,15 @@ func (s *Syncer) Start(db *sql.DB) {
 
 // runJobRunFlusher periodically flushes job run updates
 func (s *Syncer) runJobRunFlusher() {
+    defer s.wg.Done()
+
     ticker := time.NewTicker(s.config.JobRunFlushInterval)
     defer ticker.Stop()
 
     for {
         select {
         case <-s.shutdown:
+            s.logger.Debug("job run flusher shutting down")
             return
 
         case <-ticker.C:
@@ -361,12 +367,15 @@ func (s *Syncer) runJobRunFlusher() {
 
 // runStatsFlusher periodically flushes stats
 func (s *Syncer) runStatsFlusher() {
+    defer s.wg.Done()
+
     ticker := time.NewTicker(s.config.StatsFlushInterval)
     defer ticker.Stop()
 
     for {
         select {
         case <-s.shutdown:
+            s.logger.Debug("stats flusher shutting down")
             return
 
         case <-ticker.C:
@@ -388,27 +397,54 @@ func (s *Syncer) runStatsFlusher() {
     }
 }
 
-// Shutdown closes all channels
+// Shutdown performs graceful shutdown ensuring all data is persisted
 func (s *Syncer) Shutdown() error {
-    // Signal shutdown to background goroutines
-    close(s.shutdown)
+    s.logger.Info("starting syncer shutdown")
 
-    // Flush any remaining updates
+    // Step 1: Signal shutdown to stop flushers
+    // Flushers will exit their select loops
+    close(s.shutdown)
+    s.logger.Debug("shutdown signal sent, flushers stopping")
+
+    // Step 2: Final flush of any remaining buffered items
+    // This adds final items to channels before we close them
+    s.logger.Debug("performing final flush",
+        "job_run_updates", len(s.jobRunUpdateBuffer),
+        "stats", len(s.statsBuffer))
+
     if err := s.FlushJobRunUpdates(); err != nil {
         s.logger.Warn("failed to flush job run updates on shutdown", "error", err)
     }
 
-    // Flush any remaining stats
     if err := s.FlushStats(); err != nil {
         s.logger.Warn("failed to flush stats on shutdown", "error", err)
     }
 
-    // Close channels
+    // Step 3: Close write channels to signal syncers "no more data"
+    // The syncers use "for range" which will:
+    // - Process all buffered items in the channel
+    // - Exit when channel is closed and drained
+    // This is Go's standard pattern for signaling completion
+    s.logger.Debug("closing write channels")
     close(s.jobRunChannel)
     close(s.statsChannel)
     close(s.jobRunFlushRequest)
     close(s.statsFlushRequest)
 
+    // Step 4: Wait for all goroutines to finish draining and exit
+    // This ensures:
+    // - Flushers have exited (stopped adding to buffers)
+    // - Syncers have drained all items from channels
+    // - Confirmation processor has finished processing
+    // WaitGroup is ONLY used during shutdown for coordination
+    s.logger.Debug("waiting for all goroutines to exit")
+    s.wg.Wait()
+
+    // Step 5: Close confirmation channel
+    // Safe now - no goroutines are writing to it
+    close(s.jobRunConfirmations)
+
+    s.logger.Info("syncer shutdown complete")
     return nil
 }
 
@@ -717,6 +753,8 @@ The syncer manages its own background goroutines for database writes.
 ```go
 // runJobRunSyncer writes job run updates to the database
 func (s *Syncer) runJobRunSyncer(db *sql.DB) {
+    defer s.wg.Done()
+
     for update := range s.jobRunChannel {
         err := writeJobRunUpdate(db, update)
 
@@ -734,10 +772,14 @@ func (s *Syncer) runJobRunSyncer(db *sql.DB) {
                 "update_id", update.UpdateID)
         }
     }
+
+    s.logger.Debug("job run syncer shut down")
 }
 
 // runStatsSyncer writes stats updates to the database
 func (s *Syncer) runStatsSyncer(db *sql.DB) {
+    defer s.wg.Done()
+
     for update := range s.statsChannel {
         err := writeStatsUpdate(db, update)
         if err != nil {
@@ -745,10 +787,14 @@ func (s *Syncer) runStatsSyncer(db *sql.DB) {
             s.logger.Error("failed to write stats update", "error", err)
         }
     }
+
+    s.logger.Debug("stats syncer shut down")
 }
 
 // processJobRunConfirmations handles confirmations from the syncer
 func (s *Syncer) processJobRunConfirmations() {
+    defer s.wg.Done()
+
     for confirmation := range s.jobRunConfirmations {
         if !confirmation.Success {
             s.logger.Error("job run update failed",
@@ -758,6 +804,8 @@ func (s *Syncer) processJobRunConfirmations() {
             // This is a design choice - could implement retry logic
         }
     }
+
+    s.logger.Debug("confirmation processor shut down")
 }
 
 // Helper functions for database writes
@@ -1327,6 +1375,7 @@ func (s *Scheduler) Shutdown() {
 - `log/slog` - Structured logging
 - `database/sql` - Database interface
 - `sync/atomic` - Atomic operations for stats
+- `sync` - WaitGroup for coordinating goroutine shutdown
 
 ### External
 - `github.com/google/uuid` - UUID generation for runIDs
