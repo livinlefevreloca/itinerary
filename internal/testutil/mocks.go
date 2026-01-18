@@ -1,7 +1,9 @@
 package testutil
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -10,8 +12,8 @@ import (
 type MockDB struct {
 	mu             sync.Mutex
 	jobs           []*Job
-	writtenUpdates []JobRunUpdate
-	writtenStats   []StatsUpdate
+	writtenUpdates []interface{} // Store as interface{} to avoid import cycle
+	writtenStats   []interface{} // Store as interface{} to avoid import cycle
 	queryError     error
 	writeError     error
 	writeDelay     time.Duration
@@ -25,38 +27,11 @@ type Job struct {
 	PodSpec  string
 }
 
-// JobRunUpdate represents a job run update for testing
-type JobRunUpdate struct {
-	UpdateID    string
-	RunID       string
-	JobID       string
-	ScheduledAt time.Time
-	CompletedAt time.Time
-	Status      string
-	Success     bool
-	Error       error
-}
-
-// StatsUpdate represents a stats update for testing
-type StatsUpdate struct {
-	Stats []SchedulerIterationStats
-}
-
-// SchedulerIterationStats represents iteration statistics for testing
-type SchedulerIterationStats struct {
-	Timestamp               time.Time
-	IterationDuration       time.Duration
-	ActiveOrchestratorCount int
-	IndexSize               int
-	InboxDepth              int
-	MessagesProcessed       int
-}
-
 func NewMockDB() *MockDB {
 	return &MockDB{
 		jobs:           make([]*Job, 0),
-		writtenUpdates: make([]JobRunUpdate, 0),
-		writtenStats:   make([]StatsUpdate, 0),
+		writtenUpdates: make([]interface{}, 0),
+		writtenStats:   make([]interface{}, 0),
 	}
 }
 
@@ -95,7 +70,7 @@ func (m *MockDB) QueryJobDefinitions() ([]*Job, error) {
 	return m.jobs, nil
 }
 
-func (m *MockDB) WriteJobRunUpdate(update JobRunUpdate) error {
+func (m *MockDB) WriteJobRunUpdate(update interface{}) error {
 	m.mu.Lock()
 	delay := m.writeDelay
 	err := m.writeError
@@ -116,7 +91,7 @@ func (m *MockDB) WriteJobRunUpdate(update JobRunUpdate) error {
 	return nil
 }
 
-func (m *MockDB) WriteStatsUpdate(update StatsUpdate) error {
+func (m *MockDB) WriteStatsUpdate(update interface{}) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -128,20 +103,20 @@ func (m *MockDB) WriteStatsUpdate(update StatsUpdate) error {
 	return nil
 }
 
-func (m *MockDB) GetWrittenUpdates() []JobRunUpdate {
+func (m *MockDB) GetWrittenUpdates() []interface{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	result := make([]JobRunUpdate, len(m.writtenUpdates))
+	result := make([]interface{}, len(m.writtenUpdates))
 	copy(result, m.writtenUpdates)
 	return result
 }
 
-func (m *MockDB) GetWrittenStats() []StatsUpdate {
+func (m *MockDB) GetWrittenStats() []interface{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	result := make([]StatsUpdate, len(m.writtenStats))
+	result := make([]interface{}, len(m.writtenStats))
 	copy(result, m.writtenStats)
 	return result
 }
@@ -161,8 +136,8 @@ func (m *MockDB) CountWrittenStats() int {
 func (m *MockDB) ClearWritten() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.writtenUpdates = make([]JobRunUpdate, 0)
-	m.writtenStats = make([]StatsUpdate, 0)
+	m.writtenUpdates = make([]interface{}, 0)
+	m.writtenStats = make([]interface{}, 0)
 }
 
 // Satisfy sql.DB interface (minimally)
@@ -304,6 +279,76 @@ func (l *TestLogger) HasWarning() bool {
 		}
 	}
 	return false
+}
+
+func (l *TestLogger) HasDebug() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for _, entry := range l.entries {
+		if entry.Level == "DEBUG" {
+			return true
+		}
+	}
+	return false
+}
+
+// Logger returns a *slog.Logger that writes to this TestLogger
+func (l *TestLogger) Logger() *slog.Logger {
+	return slog.New(&testLogHandler{logger: l})
+}
+
+// testLogHandler implements slog.Handler for TestLogger
+type testLogHandler struct {
+	logger *TestLogger
+	attrs  []slog.Attr
+	groups []string
+}
+
+func (h *testLogHandler) Enabled(_ context.Context, _ slog.Level) bool {
+	return true
+}
+
+func (h *testLogHandler) Handle(_ context.Context, r slog.Record) error {
+	level := r.Level.String()
+	msg := r.Message
+
+	// Collect all attributes
+	fields := make([]interface{}, 0, r.NumAttrs()*2)
+	r.Attrs(func(a slog.Attr) bool {
+		fields = append(fields, a.Key, a.Value.Any())
+		return true
+	})
+
+	// Add handler-level attributes
+	for _, attr := range h.attrs {
+		fields = append(fields, attr.Key, attr.Value.Any())
+	}
+
+	h.logger.log(level, msg, fields...)
+	return nil
+}
+
+func (h *testLogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	newAttrs := make([]slog.Attr, len(h.attrs)+len(attrs))
+	copy(newAttrs, h.attrs)
+	copy(newAttrs[len(h.attrs):], attrs)
+	return &testLogHandler{
+		logger: h.logger,
+		attrs:  newAttrs,
+		groups: h.groups,
+	}
+}
+
+func (h *testLogHandler) WithGroup(name string) slog.Handler {
+	newGroups := make([]string, len(h.groups)+1)
+	copy(newGroups, h.groups)
+	newGroups[len(h.groups)] = name
+	return &testLogHandler{
+		logger: h.logger,
+		attrs:  h.attrs,
+		groups: newGroups,
+	}
 }
 
 // WaitFor waits for a condition to be true with timeout

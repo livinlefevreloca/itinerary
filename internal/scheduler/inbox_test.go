@@ -14,7 +14,7 @@ import (
 // TestInbox_Send_Success verifies that messages can be sent to an inbox with available buffer space.
 func TestInbox_Send_Success(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	inbox := NewInbox(10, 100*time.Millisecond, logger)
+	inbox := NewInbox(10, 100*time.Millisecond, logger.Logger())
 
 	// Send 5 messages
 	for i := 0; i < 5; i++ {
@@ -45,7 +45,7 @@ func TestInbox_Send_Success(t *testing.T) {
 // TestInbox_Send_Timeout verifies that Send returns false when the inbox buffer is full and times out.
 func TestInbox_Send_Timeout(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	inbox := NewInbox(2, 10*time.Millisecond, logger)
+	inbox := NewInbox(2, 10*time.Millisecond, logger.Logger())
 
 	// Fill buffer with 2 messages
 	for i := 0; i < 2; i++ {
@@ -80,7 +80,7 @@ func TestInbox_Send_Timeout(t *testing.T) {
 // TestInbox_TryReceive_Success verifies that TryReceive returns messages when inbox contains them.
 func TestInbox_TryReceive_Success(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	inbox := NewInbox(10, 100*time.Millisecond, logger)
+	inbox := NewInbox(10, 100*time.Millisecond, logger.Logger())
 
 	// Send 3 messages
 	for i := 0; i < 3; i++ {
@@ -110,7 +110,7 @@ func TestInbox_TryReceive_Success(t *testing.T) {
 // TestInbox_TryReceive_Empty verifies that TryReceive returns false when inbox is empty.
 func TestInbox_TryReceive_Empty(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	inbox := NewInbox(10, 100*time.Millisecond, logger)
+	inbox := NewInbox(10, 100*time.Millisecond, logger.Logger())
 
 	msg, ok := inbox.TryReceive()
 	if ok {
@@ -125,7 +125,7 @@ func TestInbox_TryReceive_Empty(t *testing.T) {
 // TestInbox_Receive_Blocking verifies that Receive blocks until a message is available.
 func TestInbox_Receive_Blocking(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	inbox := NewInbox(10, 100*time.Millisecond, logger)
+	inbox := NewInbox(10, 100*time.Millisecond, logger.Logger())
 
 	// Start goroutine that will receive (blocks)
 	received := make(chan InboxMessage, 1)
@@ -160,7 +160,7 @@ func TestInbox_Receive_Blocking(t *testing.T) {
 // TestInbox_UpdateDepthStats verifies that inbox depth statistics track current and maximum depths correctly.
 func TestInbox_UpdateDepthStats(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	inbox := NewInbox(10, 100*time.Millisecond, logger)
+	inbox := NewInbox(10, 100*time.Millisecond, logger.Logger())
 
 	// Send 5 messages
 	for i := 0; i < 5; i++ {
@@ -213,7 +213,7 @@ func TestInbox_UpdateDepthStats(t *testing.T) {
 // TestInbox_ConcurrentSendReceive verifies that inbox handles concurrent sends and receives correctly.
 func TestInbox_ConcurrentSendReceive(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	inbox := NewInbox(100, 100*time.Millisecond, logger)
+	inbox := NewInbox(100, 100*time.Millisecond, logger.Logger())
 
 	const numSenders = 5
 	const numMessages = 20

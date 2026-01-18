@@ -88,7 +88,7 @@ func TestNewScheduler_Success(t *testing.T) {
 	config := DefaultSchedulerConfig()
 	syncerConfig := DefaultSyncerConfig()
 
-	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger)
+	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err != nil {
 		t.Fatalf("unexpected error creating scheduler: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestNewScheduler_DBQueryFails(t *testing.T) {
 	config := DefaultSchedulerConfig()
 	syncerConfig := DefaultSyncerConfig()
 
-	_, err := NewScheduler(config, syncerConfig, mockDB, logger)
+	_, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err == nil {
 		t.Error("expected error when DB query fails")
 	}
@@ -146,7 +146,7 @@ func TestNewScheduler_InvalidCronSchedule(t *testing.T) {
 	config := DefaultSchedulerConfig()
 	syncerConfig := DefaultSyncerConfig()
 
-	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger)
+	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -370,9 +370,9 @@ func TestScheduler_CheckHeartbeats_OneMissed(t *testing.T) {
 		t.Errorf("expected status to remain Running, got %v", state.Status)
 	}
 
-	// Warning should be logged
-	if !logger.HasWarning() {
-		t.Error("expected warning for missed heartbeat")
+	// Debug log should be recorded
+	if !logger.HasDebug() {
+		t.Error("expected debug log for missed heartbeat")
 	}
 }
 
@@ -680,12 +680,12 @@ func TestScheduler_CleanupOrchestrators_SkipsActive(t *testing.T) {
 // Helper functions
 
 func createTestScheduler(t *testing.T, config SchedulerConfig, syncerConfig SyncerConfig, logger *testutil.TestLogger) *Scheduler {
-	inbox := NewInbox(config.InboxBufferSize, config.InboxSendTimeout, logger)
-	syncer := NewSyncer(syncerConfig, logger)
+	inbox := NewInbox(config.InboxBufferSize, config.InboxSendTimeout, logger.Logger())
+	syncer, _ := NewSyncer(syncerConfig, logger.Logger())
 
 	return &Scheduler{
 		config:              config,
-		logger:              logger,
+		logger:  logger.Logger(),
 		index:               nil, // Not needed for most tests
 		activeOrchestrators: make(map[string]*OrchestratorState),
 		inbox:               inbox,

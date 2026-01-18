@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/scheduler/index"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -26,7 +27,7 @@ func BenchmarkGenerateRunID(b *testing.B) {
 // BenchmarkInbox_SendReceive measures inbox send and receive throughput.
 func BenchmarkInbox_SendReceive(b *testing.B) {
 	logger := testutil.NewTestLogger()
-	inbox := NewInbox(10000, 100*time.Millisecond, logger)
+	inbox := NewInbox(10000, 100*time.Millisecond, logger.Logger())
 
 	msg := InboxMessage{
 		Type: MsgShutdown,
@@ -58,7 +59,7 @@ func benchmarkSyncerBufferAndFlush(b *testing.B, count int) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
 	config.JobRunChannelSize = count * 2
-	syncer := NewSyncer(config, logger)
+	syncer, _ := NewSyncer(config, logger.Logger())
 
 	mockDB := testutil.NewMockDB()
 	syncer.Start(mockDB)
@@ -112,7 +113,7 @@ func benchmarkProcessInbox(b *testing.B, messageCount int) {
 	config.InboxBufferSize = messageCount * 2
 	syncerConfig := DefaultSyncerConfig()
 
-	scheduler := createTestScheduler(b, config, syncerConfig, logger)
+	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
 	// Prepare messages
 	messages := make([]InboxMessage, messageCount)
@@ -155,20 +156,20 @@ func benchmarkScheduleOrchestrators(b *testing.B, count int) {
 	syncerConfig := DefaultSyncerConfig()
 	syncerConfig.MaxBufferedJobRunUpdates = count * 10
 
-	scheduler := createTestScheduler(b, config, syncerConfig, logger)
+	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
 	// Create mock index with runs
 	now := time.Now()
-	runs := make([]ScheduledRun, count)
+	runs := make([]index.ScheduledRun, count)
 	for i := 0; i < count; i++ {
-		runs[i] = ScheduledRun{
+		runs[i] = index.ScheduledRun{
 			JobID:       fmt.Sprintf("job%d", i),
 			ScheduledAt: now.Add(time.Duration(i) * time.Second),
 		}
 	}
 
 	// Mock index that returns these runs
-	scheduler.index = &MockIndex{runs: runs}
+	scheduler.index = index.NewScheduledRunIndex(runs)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -208,7 +209,7 @@ func benchmarkSingleIteration(b *testing.B, orchestratorCount int) {
 	config := DefaultSchedulerConfig()
 	syncerConfig := DefaultSyncerConfig()
 
-	scheduler := createTestScheduler(b, config, syncerConfig, logger)
+	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
 	// Create orchestrators
 	now := time.Now()
@@ -225,7 +226,7 @@ func benchmarkSingleIteration(b *testing.B, orchestratorCount int) {
 	}
 
 	// Mock empty index
-	scheduler.index = &MockIndex{runs: []ScheduledRun{}}
+	scheduler.index = index.NewScheduledRunIndex([]index.ScheduledRun{})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -239,7 +240,7 @@ func BenchmarkScheduler_CheckHeartbeats_1000(b *testing.B) {
 	config := DefaultSchedulerConfig()
 	syncerConfig := DefaultSyncerConfig()
 
-	scheduler := createTestScheduler(b, config, syncerConfig, logger)
+	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
 	// Create 1000 orchestrators
 	now := time.Now()
@@ -268,7 +269,7 @@ func BenchmarkScheduler_CleanupOrchestrators_1000(b *testing.B) {
 	config.GracePeriod = 30 * time.Second
 	syncerConfig := DefaultSyncerConfig()
 
-	scheduler := createTestScheduler(b, config, syncerConfig, logger)
+	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
 	// Create 1000 completed orchestrators past grace period
 	now := time.Now()
@@ -306,10 +307,10 @@ func BenchmarkScheduler_CleanupOrchestrators_1000(b *testing.B) {
 
 // Mock index for benchmarking
 type MockIndex struct {
-	runs []ScheduledRun
+	runs []index.ScheduledRun
 }
 
-func (m *MockIndex) Query(start, end time.Time) []ScheduledRun {
+func (m *MockIndex) Query(start, end time.Time) []index.ScheduledRun {
 	return m.runs
 }
 
@@ -317,7 +318,7 @@ func (m *MockIndex) Len() int {
 	return len(m.runs)
 }
 
-func (m *MockIndex) Swap(runs []ScheduledRun) {
+func (m *MockIndex) Swap(runs []index.ScheduledRun) {
 	m.runs = runs
 }
 
@@ -326,13 +327,13 @@ type BenchmarkT interface {
 	Fatalf(format string, args ...interface{})
 }
 
-func createTestScheduler(t BenchmarkT, config SchedulerConfig, syncerConfig SyncerConfig, logger *testutil.TestLogger) *Scheduler {
-	inbox := NewInbox(config.InboxBufferSize, config.InboxSendTimeout, logger)
-	syncer := NewSyncer(syncerConfig, logger)
+func createBenchScheduler(t BenchmarkT, config SchedulerConfig, syncerConfig SyncerConfig, logger *testutil.TestLogger) *Scheduler {
+	inbox := NewInbox(config.InboxBufferSize, config.InboxSendTimeout, logger.Logger())
+	syncer, _ := NewSyncer(syncerConfig, logger.Logger())
 
 	return &Scheduler{
 		config:              config,
-		logger:              logger,
+		logger:  logger.Logger(),
 		index:               nil,
 		activeOrchestrators: make(map[string]*OrchestratorState),
 		inbox:               inbox,

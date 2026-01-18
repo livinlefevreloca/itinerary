@@ -287,7 +287,6 @@ func TestOrchestrator_StopsHeartbeatsOnCompletion(t *testing.T) {
 	done := make(chan bool)
 
 	go func() {
-		completionTime := time.Time{}
 		for i := 0; i < 100; i++ { // Check for a while
 			msg, ok := scheduler.inbox.TryReceive()
 			if !ok {
@@ -303,7 +302,6 @@ func TestOrchestrator_StopsHeartbeatsOnCompletion(t *testing.T) {
 
 			if msg.Type == MsgOrchestratorComplete {
 				completed = true
-				completionTime = time.Now()
 				// Wait a bit more to see if heartbeats stop
 				time.Sleep(200 * time.Millisecond)
 				done <- true

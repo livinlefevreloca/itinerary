@@ -239,7 +239,7 @@ if [[ ${#DIRECTORIES[@]} -eq 0 ]]; then
     DIRECTORIES=(".")
 fi
 
-# Validate directories exist and contain Go files
+# Validate directories exist and find all subdirectories with Go test files
 VALID_DIRS=()
 for dir in "${DIRECTORIES[@]}"; do
     if [[ ! -d "$dir" ]]; then
@@ -247,13 +247,10 @@ for dir in "${DIRECTORIES[@]}"; do
         continue
     fi
 
-    # Check if directory contains Go test files
-    if ! ls "$dir"/*_test.go &> /dev/null; then
-        warn "Skipping $dir (no *_test.go files found)"
-        continue
-    fi
-
-    VALID_DIRS+=("$dir")
+    # Recursively find all directories containing Go test files
+    while IFS= read -r -d '' test_dir; do
+        VALID_DIRS+=("$test_dir")
+    done < <(find "$dir" -type f -name '*_test.go' -print0 | xargs -0 -n1 dirname | sort -u | tr '\n' '\0')
 done
 
 if [[ ${#VALID_DIRS[@]} -eq 0 ]]; then
