@@ -77,12 +77,12 @@ func DefaultSchedulerConfig() SchedulerConfig {
 
 func DefaultSyncerConfig() SyncerConfig {
     return SyncerConfig{
-        MaxBufferedJobRunUpdates: 10000, // Reduced by 10x to catch issues sooner
-        JobRunChannelSize:        1000,
+        MaxBufferedJobRunUpdates: 10000,
+        JobRunChannelSize:        200,  // OLTP-friendly: smaller batches, more frequent flushes
         StatsChannelSize:         100,
-        JobRunFlushThreshold:     500, // Half of channel size
+        JobRunFlushThreshold:     100,  // OLTP-friendly: half of channel size, reduces lock contention
         JobRunFlushInterval:      1 * time.Second,
-        StatsFlushThreshold:      30, // 30 iterations (~30 seconds at 1s loop interval)
+        StatsFlushThreshold:      30,   // 30 iterations (~30 seconds at 1s loop interval)
         StatsFlushInterval:       30 * time.Second,
     }
 }
@@ -196,11 +196,11 @@ type SyncerConfig struct {
     MaxBufferedJobRunUpdates int // Default: 10000
 
     // Channel buffer sizes
-    JobRunChannelSize       int // Default: 1000
+    JobRunChannelSize       int // Default: 200
     StatsChannelSize        int // Default: 100
 
     // Job run flushing - dual mechanism (size OR time triggers flush)
-    JobRunFlushThreshold int           // Default: 500 (half of channel size)
+    JobRunFlushThreshold int           // Default: 100 (half of channel size)
     JobRunFlushInterval  time.Duration // Default: 1 second
 
     // Stats flushing - dual mechanism (size OR time triggers flush)
