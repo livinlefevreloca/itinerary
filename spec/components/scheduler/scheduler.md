@@ -75,9 +75,10 @@ func DefaultSyncerConfig() SyncerConfig {
         JobRunChannelSize:        1000,
         JobRunConfirmationsSize:  1000,
         StatsChannelSize:         100,
-        StatsPeriod:              30 * time.Second,
-        JobRunFlushThreshold:     500, // Half of channel size
+        JobRunFlushThreshold:     500,        // Half of channel size
         JobRunFlushInterval:      1 * time.Second,
+        StatsFlushThreshold:      30,         // 30 iterations (~30 seconds at 1s loop interval)
+        StatsFlushInterval:       30 * time.Second,
     }
 }
 ```
@@ -176,9 +177,10 @@ type Syncer struct {
     lastJobRunFlush     time.Time
 
     // Stats buffering
-    statsBuffer       []SchedulerIterationStats
-    statsChannel      chan StatsUpdate
-    lastStatsSyncTime time.Time
+    statsBuffer        []SchedulerIterationStats
+    statsChannel       chan StatsUpdate
+    statsFlushRequest  chan struct{} // Signal for manual flush
+    lastStatsFlush     time.Time
 
     // Control
     shutdown chan struct{}
@@ -193,14 +195,13 @@ type SyncerConfig struct {
     JobRunConfirmationsSize int // Default: 1000
     StatsChannelSize        int // Default: 100
 
-    // How often to sync stats to database
-    StatsPeriod time.Duration // Default: 30 seconds
+    // Job run flushing - dual mechanism (size OR time triggers flush)
+    JobRunFlushThreshold int           // Default: 500 (half of channel size)
+    JobRunFlushInterval  time.Duration // Default: 1 second
 
-    // Flush job runs when buffer reaches this size
-    JobRunFlushThreshold int // Default: 500 (half of channel size)
-
-    // Flush job runs after this duration even if threshold not reached
-    JobRunFlushInterval time.Duration // Default: 1 second
+    // Stats flushing - dual mechanism (size OR time triggers flush)
+    StatsFlushThreshold int           // Default: 30 iterations
+    StatsFlushInterval  time.Duration // Default: 30 seconds
 }
 
 func NewSyncer(config SyncerConfig, logger *slog.Logger) *Syncer {
@@ -214,6 +215,8 @@ func NewSyncer(config SyncerConfig, logger *slog.Logger) *Syncer {
         lastJobRunFlush:     time.Now(),
         statsBuffer:         make([]SchedulerIterationStats, 0),
         statsChannel:        make(chan StatsUpdate, config.StatsChannelSize),
+        statsFlushRequest:   make(chan struct{}, 1),
+        lastStatsFlush:      time.Now(),
         shutdown:            make(chan struct{}),
     }
 }
@@ -266,19 +269,23 @@ func (s *Syncer) FlushJobRunUpdates() error {
     return nil
 }
 
-// BufferStats adds iteration stats to the buffer
+// BufferStats adds iteration stats to the buffer and signals flush if needed
+// Flushing happens in two cases:
+//   1. Size-based: When buffer reaches StatsFlushThreshold
+//   2. Time-based: After StatsFlushInterval (handled by runStatsFlusher)
 func (s *Syncer) BufferStats(stats SchedulerIterationStats) {
     s.statsBuffer = append(s.statsBuffer, stats)
+
+    // Check if we should flush based on size
+    if len(s.statsBuffer) >= s.config.StatsFlushThreshold {
+        s.requestStatsFlush()
+    }
 }
 
-// MaybeSyncStats syncs stats if the period has elapsed
-func (s *Syncer) MaybeSyncStats(now time.Time) {
-    if now.Sub(s.lastStatsSyncTime) < s.config.StatsPeriod {
-        return
-    }
-
+// FlushStats sends all buffered stats to the syncer channel
+func (s *Syncer) FlushStats() error {
     if len(s.statsBuffer) == 0 {
-        return
+        return nil
     }
 
     update := StatsUpdate{
@@ -288,10 +295,21 @@ func (s *Syncer) MaybeSyncStats(now time.Time) {
     select {
     case s.statsChannel <- update:
         s.statsBuffer = make([]SchedulerIterationStats, 0)
-        s.lastStatsSyncTime = now
-        s.logger.Debug("synced stats", "count", len(update.Stats))
+        s.logger.Debug("flushed stats", "count", len(update.Stats))
+        return nil
     default:
-        s.logger.Warn("stats channel full, skipping sync")
+        s.logger.Warn("stats channel full, keeping stats buffered",
+            "buffered_count", len(s.statsBuffer))
+        return fmt.Errorf("stats channel full")
+    }
+}
+
+// requestStatsFlush signals the stats flusher to flush (non-blocking)
+func (s *Syncer) requestStatsFlush() {
+    select {
+    case s.statsFlushRequest <- struct{}{}:
+    default:
+        // Already a flush pending
     }
 }
 
@@ -306,6 +324,7 @@ func (s *Syncer) GetStats() SyncerStats {
 // Start launches background goroutines for syncing
 func (s *Syncer) Start(db *sql.DB) {
     go s.runJobRunFlusher()
+    go s.runStatsFlusher()
     go s.runJobRunSyncer(db)
     go s.runStatsSyncer(db)
     go s.processJobRunConfirmations()
@@ -340,6 +359,35 @@ func (s *Syncer) runJobRunFlusher() {
     }
 }
 
+// runStatsFlusher periodically flushes stats
+func (s *Syncer) runStatsFlusher() {
+    ticker := time.NewTicker(s.config.StatsFlushInterval)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-s.shutdown:
+            return
+
+        case <-ticker.C:
+            // Periodic flush
+            if len(s.statsBuffer) > 0 {
+                if err := s.FlushStats(); err != nil {
+                    // Error logged in FlushStats
+                }
+                s.lastStatsFlush = time.Now()
+            }
+
+        case <-s.statsFlushRequest:
+            // Size-based flush requested
+            if err := s.FlushStats(); err != nil {
+                // Error logged in FlushStats
+            }
+            s.lastStatsFlush = time.Now()
+        }
+    }
+}
+
 // Shutdown closes all channels
 func (s *Syncer) Shutdown() error {
     // Signal shutdown to background goroutines
@@ -350,10 +398,16 @@ func (s *Syncer) Shutdown() error {
         s.logger.Warn("failed to flush job run updates on shutdown", "error", err)
     }
 
+    // Flush any remaining stats
+    if err := s.FlushStats(); err != nil {
+        s.logger.Warn("failed to flush stats on shutdown", "error", err)
+    }
+
     // Close channels
     close(s.jobRunChannel)
     close(s.statsChannel)
     close(s.jobRunFlushRequest)
+    close(s.statsFlushRequest)
 
     return nil
 }
@@ -836,9 +890,9 @@ func (s *Scheduler) iteration() {
     // Step 3: Clean up completed orchestrators
     s.cleanupOrchestrators(start)
 
-    // Step 4: Record iteration statistics and maybe sync
+    // Step 4: Record iteration statistics
+    // Stats are automatically flushed by syncer based on size/time
     s.recordIterationStats(start, messagesProcessed)
-    s.syncer.MaybeSyncStats(start)
 
     // Step 5: Update inbox depth stats
     s.inbox.UpdateDepthStats()
@@ -1300,11 +1354,15 @@ Will be defined in `scheduler-tests.md` but key areas:
 - Cleanup timing (grace period)
 - Shutdown and cancellation
 - Config updates in PreRun state
-- Job run update buffering and confirmation
-  - Size-based flushing (threshold reached)
-  - Time-based flushing (interval elapsed)
+- Job run update buffering and flushing
+  - Size-based flushing (JobRunFlushThreshold reached)
+  - Time-based flushing (JobRunFlushInterval elapsed)
   - Dual trigger scenarios
-- Stats buffering and syncing
+  - Confirmation handling
+- Stats buffering and flushing
+  - Size-based flushing (StatsFlushThreshold reached)
+  - Time-based flushing (StatsFlushInterval elapsed)
+  - Dual trigger scenarios
 - Inbox timeout and depth tracking
 - Concurrent access (race detector)
 
