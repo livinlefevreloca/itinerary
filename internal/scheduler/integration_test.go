@@ -21,16 +21,9 @@ func TestIntegration_ScheduleAndExecuteJob(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	mockDB := testutil.NewMockDB()
 
-	// Round to next minute for cron scheduling
-	now := time.Now()
-	futureTime := now.Truncate(time.Minute).Add(time.Minute)
-
-	// Create cron expression for that exact minute
-	// Format uses Go time format constants: 4=minute, 15=hour, 2=day, 1=month, *=any day-of-week
-	cronExpr := futureTime.Format("4 15 2 1 *")
-
+	// Schedule job to run every minute so it executes soon
 	mockDB.SetJobs([]*testutil.Job{
-		{ID: "job1", Schedule: cronExpr},
+		{ID: "job1", Schedule: "* * * * *"}, // Every minute
 	})
 
 	config := DefaultSchedulerConfig()
@@ -40,6 +33,7 @@ func TestIntegration_ScheduleAndExecuteJob(t *testing.T) {
 	config.LoopInterval = 500 * time.Millisecond
 
 	syncerConfig := DefaultSyncerConfig()
+	syncerConfig.JobRunFlushThreshold = 1 // Flush immediately for testing
 
 	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err != nil {
@@ -51,9 +45,10 @@ func TestIntegration_ScheduleAndExecuteJob(t *testing.T) {
 	defer scheduler.Shutdown()
 
 	// Wait for job to be scheduled and executed
+	// Job runs at next minute boundary, plus execution time (250ms), plus flush time
 	testutil.WaitFor(t, func() bool {
 		return mockDB.CountWrittenUpdates() > 0
-	}, 3*time.Second, "waiting for job updates")
+	}, 90*time.Second, "waiting for job updates")
 
 	// Verify job run was recorded
 	updates := mockDB.GetWrittenUpdates()
@@ -86,16 +81,11 @@ func TestIntegration_MultipleJobsOverlapping(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	mockDB := testutil.NewMockDB()
 
-	// Create 3 jobs all scheduled for same time in the future
-	now := time.Now()
-	futureTime := now.Truncate(time.Minute).Add(time.Minute)
-	// Format uses Go time format constants: 4=minute, 15=hour, 2=day, 1=month, *=any day-of-week
-	cronExpr := futureTime.Format("4 15 2 1 *")
-
+	// Create 3 jobs all scheduled to run every minute
 	mockDB.SetJobs([]*testutil.Job{
-		{ID: "job1", Schedule: cronExpr},
-		{ID: "job2", Schedule: cronExpr},
-		{ID: "job3", Schedule: cronExpr},
+		{ID: "job1", Schedule: "* * * * *"}, // Every minute
+		{ID: "job2", Schedule: "* * * * *"}, // Every minute
+		{ID: "job3", Schedule: "* * * * *"}, // Every minute
 	})
 
 	config := DefaultSchedulerConfig()
@@ -104,6 +94,7 @@ func TestIntegration_MultipleJobsOverlapping(t *testing.T) {
 	config.LoopInterval = 500 * time.Millisecond
 
 	syncerConfig := DefaultSyncerConfig()
+	syncerConfig.JobRunFlushThreshold = 1 // Flush immediately for testing
 
 	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err != nil {
@@ -113,10 +104,10 @@ func TestIntegration_MultipleJobsOverlapping(t *testing.T) {
 	go scheduler.Start(mockDB)
 	defer scheduler.Shutdown()
 
-	// Wait for all jobs to be scheduled
+	// Wait for all jobs to be scheduled and executed
 	testutil.WaitFor(t, func() bool {
 		return mockDB.CountWrittenUpdates() >= 3
-	}, 3*time.Second, "waiting for all job updates")
+	}, 90*time.Second, "waiting for all job updates")
 
 	// Verify all 3 jobs were recorded
 	updates := mockDB.GetWrittenUpdates()
@@ -154,6 +145,10 @@ func TestIntegration_HeartbeatOrphaning(t *testing.T) {
 		t.Fatalf("failed to create scheduler: %v", err)
 	}
 
+	// Start syncer to enable background writes
+	scheduler.syncer.Start(mockDB)
+	defer scheduler.syncer.Shutdown()
+
 	// Manually create an orchestrator that won't send heartbeats
 	runID := "job1:1704067200"
 	state := &OrchestratorState{
@@ -176,6 +171,10 @@ func TestIntegration_HeartbeatOrphaning(t *testing.T) {
 	if state.Status != OrchestratorOrphaned {
 		t.Errorf("expected status to be Orphaned, got %v", state.Status)
 	}
+
+	// Flush updates and wait for writes
+	scheduler.syncer.FlushJobRunUpdates()
+	time.Sleep(100 * time.Millisecond)
 
 	// Orphaned update should be recorded
 	foundOrphaned := false
@@ -210,6 +209,9 @@ func TestIntegration_ShutdownWithActiveJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create scheduler: %v", err)
 	}
+
+	// Start syncer to enable background writes
+	scheduler.syncer.Start(mockDB)
 
 	// Create 10 orchestrators
 	for i := 0; i < 10; i++ {

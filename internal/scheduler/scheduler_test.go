@@ -126,6 +126,7 @@ func TestNewScheduler_DBQueryFails(t *testing.T) {
 	_, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err == nil {
 		t.Error("expected error when DB query fails")
+		t.Logf("Error logs: %+v", logger.GetEntriesByLevel("ERROR"))
 	}
 
 	if err != nil && !strings.Contains(err.Error(), "failed to query jobs on startup") {
@@ -155,7 +156,7 @@ func TestNewScheduler_InvalidCronSchedule(t *testing.T) {
 	errorLogs := logger.GetEntriesByLevel("ERROR")
 	found := false
 	for _, entry := range errorLogs {
-		if entry.Message == "failed to parse cron schedule on startup" {
+		if entry.Message == "failed to parse cron schedule" {
 			found = true
 			break
 		}

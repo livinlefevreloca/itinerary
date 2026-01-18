@@ -3,6 +3,7 @@ package scheduler
 import (
 	"fmt"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/livinlefevreloca/itinerary/internal/cron"
@@ -62,7 +63,9 @@ func NewScheduler(config SchedulerConfig, syncerConfig SyncerConfig, db interfac
 	}
 
 	// 5. Build initial index (synchronously on startup)
-	s.performIndexBuild(db)
+	if err := s.performIndexBuild(db); err != nil {
+		return nil, fmt.Errorf("failed to build initial index: %w", err)
+	}
 
 	return s, nil
 }
@@ -551,17 +554,18 @@ func (s *Scheduler) runIndexBuilder(db interface{}) {
 			return
 
 		case <-ticker.C:
-			s.performIndexBuild(db)
+			_ = s.performIndexBuild(db)
 
 		case <-s.rebuildIndexChan:
 			// Explicit rebuild requested (e.g., schedule change)
-			s.performIndexBuild(db)
+			_ = s.performIndexBuild(db)
 		}
 	}
 }
 
 // performIndexBuild queries jobs and builds the scheduled run index
-func (s *Scheduler) performIndexBuild(db interface{}) {
+// Returns error if database query fails
+func (s *Scheduler) performIndexBuild(db interface{}) error {
 	buildStart := time.Now()
 	start := buildStart.Add(-s.config.GracePeriod)
 	end := buildStart.Add(s.config.LookaheadWindow)
@@ -575,7 +579,7 @@ func (s *Scheduler) performIndexBuild(db interface{}) {
 	if err != nil {
 		s.logger.Error("failed to query job definitions",
 			"error", err)
-		return
+		return fmt.Errorf("failed to query jobs on startup: %w", err)
 	}
 
 	// 2. Generate scheduled runs
@@ -612,27 +616,49 @@ func (s *Scheduler) performIndexBuild(db interface{}) {
 		"job_count", len(jobs),
 		"duration", duration,
 		"total_builds", s.indexBuildCount)
+
+	return nil
 }
 
 // queryJobDefinitions queries job definitions from the database
 func queryJobDefinitions(db interface{}) ([]*Job, error) {
 	// Use type assertion to handle MockDB for testing
+	// The interface uses interface{} to avoid import cycles with testutil
 	type jobQuerier interface {
-		QueryJobDefinitions() ([]*Job, error)
+		QueryJobDefinitions() (interface{}, error)
 	}
 
 	if querier, ok := db.(jobQuerier); ok {
-		jobs, err := querier.QueryJobDefinitions()
+		jobsInterface, err := querier.QueryJobDefinitions()
 		if err != nil {
 			return nil, err
 		}
 
-		// Convert testutil.Job to scheduler.Job
-		result := make([]*Job, len(jobs))
-		for i, j := range jobs {
+		// Convert jobs to scheduler.Job using reflection
+		// This works with any struct that has ID and Schedule fields
+		val := reflect.ValueOf(jobsInterface)
+		if val.Kind() != reflect.Slice {
+			return []*Job{}, fmt.Errorf("expected slice from QueryJobDefinitions, got %T", jobsInterface)
+		}
+
+		result := make([]*Job, val.Len())
+		for i := 0; i < val.Len(); i++ {
+			elem := val.Index(i)
+			if elem.Kind() == reflect.Ptr {
+				elem = elem.Elem()
+			}
+
+			// Extract ID and Schedule fields
+			idField := elem.FieldByName("ID")
+			scheduleField := elem.FieldByName("Schedule")
+
+			if !idField.IsValid() || !scheduleField.IsValid() {
+				return nil, fmt.Errorf("job struct missing ID or Schedule field")
+			}
+
 			result[i] = &Job{
-				ID:       j.ID,
-				Schedule: j.Schedule,
+				ID:       idField.String(),
+				Schedule: scheduleField.String(),
 			}
 		}
 		return result, nil

@@ -181,7 +181,7 @@ START:
 	// 3. Send MsgOrchestratorStateChange with OrchestratorRetrying status
 	// 4. This prevents race where retry pod starts before grace period expires
 
-	executionDuration := 100 * time.Millisecond
+	executionDuration := 250 * time.Millisecond
 	executionDeadline := time.After(executionDuration)
 	heartbeatTicker := time.NewTicker(s.config.OrchestratorHeartbeatInterval)
 	defer heartbeatTicker.Stop()

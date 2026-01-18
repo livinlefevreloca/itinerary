@@ -59,7 +59,7 @@ func (m *MockDB) SetWriteDelay(delay time.Duration) {
 	m.writeDelay = delay
 }
 
-func (m *MockDB) QueryJobDefinitions() ([]*Job, error) {
+func (m *MockDB) QueryJobDefinitions() (interface{}, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

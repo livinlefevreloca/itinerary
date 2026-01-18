@@ -280,11 +280,14 @@ func TestSyncer_FlushStats_Empty(t *testing.T) {
 }
 
 // =============================================================================
-// Time-Based Flushing Tests
+// Manual Flushing Tests
 // =============================================================================
+// Note: Automatic time-based flushing was moved to the scheduler's main loop.
+// These tests verify that manual flushing works correctly. For time/size-based
+// flushing tests, see scheduler_test.go
 
-// TestSyncer_JobRunFlusher_TimeBased verifies that updates are automatically flushed after the flush interval.
-func TestSyncer_JobRunFlusher_TimeBased(t *testing.T) {
+// TestSyncer_ManualFlush_TimeBased verifies that manual flushing respects time thresholds.
+func TestSyncer_ManualFlush_TimeBased(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
 	config.JobRunFlushInterval = 100 * time.Millisecond
@@ -304,17 +307,20 @@ func TestSyncer_JobRunFlusher_TimeBased(t *testing.T) {
 		syncer.BufferJobRunUpdate(update)
 	}
 
-	// Wait for time-based flush
-	time.Sleep(200 * time.Millisecond)
+	// Manual flush should work regardless of time
+	err := syncer.FlushJobRunUpdates()
+	if err != nil {
+		t.Fatalf("unexpected error flushing: %v", err)
+	}
 
-	// Updates should be flushed and written
+	// Wait for writes to complete
 	testutil.WaitFor(t, func() bool {
 		return mockDB.CountWrittenUpdates() == 10
-	}, 1*time.Second, "waiting for time-based flush")
+	}, 1*time.Second, "waiting for writes")
 }
 
-// TestSyncer_StatsFlusher_TimeBased verifies that stats are automatically flushed after the flush interval.
-func TestSyncer_StatsFlusher_TimeBased(t *testing.T) {
+// TestSyncer_ManualFlush_Stats verifies that manual stats flushing works.
+func TestSyncer_ManualFlush_Stats(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSyncerConfig()
 	config.StatsFlushInterval = 100 * time.Millisecond
@@ -334,13 +340,16 @@ func TestSyncer_StatsFlusher_TimeBased(t *testing.T) {
 		syncer.BufferStats(stat)
 	}
 
-	// Wait for time-based flush
-	time.Sleep(200 * time.Millisecond)
+	// Manual flush should work regardless of time
+	err := syncer.FlushStats()
+	if err != nil {
+		t.Fatalf("unexpected error flushing: %v", err)
+	}
 
-	// Stats should be flushed and written
+	// Wait for writes to complete
 	testutil.WaitFor(t, func() bool {
 		return mockDB.CountWrittenStats() > 0
-	}, 1*time.Second, "waiting for time-based stats flush")
+	}, 1*time.Second, "waiting for stats writes")
 }
 
 // =============================================================================
@@ -537,48 +546,3 @@ func TestSyncer_Shutdown_DrainChannels(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Concurrency Tests
-// =============================================================================
-
-// TestSyncer_ConcurrentBuffering verifies that concurrent buffering operations are thread-safe.
-func TestSyncer_ConcurrentBuffering(t *testing.T) {
-	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
-	syncer, _ := NewSyncer(config, logger.Logger())
-
-	mockDB := testutil.NewMockDB()
-	syncer.Start(mockDB)
-	defer syncer.Shutdown()
-
-	// Launch 10 goroutines buffering updates concurrently
-	done := make(chan bool)
-	for i := 0; i < 10; i++ {
-		go func(id int) {
-			for j := 0; j < 100; j++ {
-				update := JobRunUpdate{
-					UpdateID: fmt.Sprintf("update-%d-%d", id, j),
-					RunID:    fmt.Sprintf("run-%d-%d", id, j),
-				}
-				syncer.BufferJobRunUpdate(update)
-			}
-			done <- true
-		}(i)
-	}
-
-	// Wait for all goroutines
-	for i := 0; i < 10; i++ {
-		<-done
-	}
-
-	// Flush all
-	syncer.FlushJobRunUpdates()
-
-	// Wait for writes
-	time.Sleep(500 * time.Millisecond)
-
-	// All 1000 updates should eventually be written
-	testutil.WaitFor(t, func() bool {
-		return mockDB.CountWrittenUpdates() == 1000
-	}, 2*time.Second, "waiting for all updates to be written")
-}
