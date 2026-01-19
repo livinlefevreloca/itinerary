@@ -1,4 +1,4 @@
-package scheduler
+package syncer
 
 import (
 	"fmt"
@@ -8,6 +8,13 @@ import (
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
+// SchedulerIterationStats is a test type for stats buffering tests
+// In production, this would come from the scheduler package
+type SchedulerIterationStats struct {
+	Timestamp time.Time
+	Value     int
+}
+
 // =============================================================================
 // Job Run Update Buffering Tests
 // =============================================================================
@@ -15,7 +22,7 @@ import (
 // TestSyncer_BufferJobRunUpdate_BelowThreshold verifies that updates are buffered without flushing when below threshold.
 func TestSyncer_BufferJobRunUpdate_BelowThreshold(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	config.JobRunFlushThreshold = 500
 	syncer, _ := NewSyncer(config, logger.Logger())
 
@@ -40,7 +47,7 @@ func TestSyncer_BufferJobRunUpdate_BelowThreshold(t *testing.T) {
 // TestSyncer_BufferJobRunUpdate_ReachesThreshold verifies that updates can be buffered up to threshold.
 func TestSyncer_BufferJobRunUpdate_ReachesThreshold(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	config.JobRunFlushThreshold = 500
 	syncer, _ := NewSyncer(config, logger.Logger())
 
@@ -66,7 +73,7 @@ func TestSyncer_BufferJobRunUpdate_ReachesThreshold(t *testing.T) {
 // TestSyncer_BufferJobRunUpdate_ExceedsMaximum verifies that an error is returned when buffer exceeds maximum size.
 func TestSyncer_BufferJobRunUpdate_ExceedsMaximum(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	config.MaxBufferedJobRunUpdates = 100
 	syncer, _ := NewSyncer(config, logger.Logger())
 
@@ -99,15 +106,15 @@ func TestSyncer_BufferJobRunUpdate_ExceedsMaximum(t *testing.T) {
 // TestSyncer_BufferStats_BelowThreshold verifies that stats are buffered without flushing when below threshold.
 func TestSyncer_BufferStats_BelowThreshold(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	config.StatsFlushThreshold = 30
 	syncer, _ := NewSyncer(config, logger.Logger())
 
 	// Buffer 10 stats (below threshold)
 	for i := 0; i < 10; i++ {
 		stats := SchedulerIterationStats{
-			Timestamp:               time.Now(),
-			ActiveOrchestratorCount: i,
+			Timestamp: time.Now(),
+			Value:     i,
 		}
 		syncer.BufferStats(stats)
 	}
@@ -121,15 +128,15 @@ func TestSyncer_BufferStats_BelowThreshold(t *testing.T) {
 // TestSyncer_BufferStats_ReachesThreshold verifies that stats can be buffered up to threshold.
 func TestSyncer_BufferStats_ReachesThreshold(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	config.StatsFlushThreshold = 30
 	syncer, _ := NewSyncer(config, logger.Logger())
 
 	// Buffer exactly 30 stats (threshold)
 	for i := 0; i < 30; i++ {
 		stats := SchedulerIterationStats{
-			Timestamp:               time.Now(),
-			ActiveOrchestratorCount: i,
+			Timestamp: time.Now(),
+			Value:     i,
 		}
 		syncer.BufferStats(stats)
 	}
@@ -148,7 +155,7 @@ func TestSyncer_BufferStats_ReachesThreshold(t *testing.T) {
 // TestSyncer_FlushJobRunUpdates_Success verifies that buffered updates are flushed to the channel and cleared.
 func TestSyncer_FlushJobRunUpdates_Success(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	config.JobRunChannelSize = 200
 	syncer, _ := NewSyncer(config, logger.Logger())
 
@@ -197,7 +204,7 @@ func TestSyncer_FlushJobRunUpdates_Success(t *testing.T) {
 // TestSyncer_FlushJobRunUpdates_ChannelFull verifies that flush returns an error when the channel is full.
 func TestSyncer_FlushJobRunUpdates_ChannelFull(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	config.JobRunChannelSize = 10
 	syncer, _ := NewSyncer(config, logger.Logger())
 
@@ -228,7 +235,7 @@ func TestSyncer_FlushJobRunUpdates_ChannelFull(t *testing.T) {
 // TestSyncer_FlushStats_Success verifies that buffered stats are flushed to the channel and cleared.
 func TestSyncer_FlushStats_Success(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	syncer, _ := NewSyncer(config, logger.Logger())
 
 	mockDB := testutil.NewMockDB()
@@ -238,8 +245,8 @@ func TestSyncer_FlushStats_Success(t *testing.T) {
 	// Buffer 50 stats
 	for i := 0; i < 50; i++ {
 		stat := SchedulerIterationStats{
-			Timestamp:               time.Now(),
-			ActiveOrchestratorCount: i,
+			Timestamp: time.Now(),
+			Value:     i,
 		}
 		syncer.BufferStats(stat)
 	}
@@ -269,7 +276,7 @@ func TestSyncer_FlushStats_Success(t *testing.T) {
 // TestSyncer_FlushStats_Empty verifies that flushing an empty stats buffer succeeds without error.
 func TestSyncer_FlushStats_Empty(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	syncer, _ := NewSyncer(config, logger.Logger())
 
 	// Flush empty buffer
@@ -289,7 +296,7 @@ func TestSyncer_FlushStats_Empty(t *testing.T) {
 // TestSyncer_ManualFlush_TimeBased verifies that manual flushing respects time thresholds.
 func TestSyncer_ManualFlush_TimeBased(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	config.JobRunFlushInterval = 100 * time.Millisecond
 	config.JobRunFlushThreshold = 1000 // High threshold - won't trigger
 	syncer, _ := NewSyncer(config, logger.Logger())
@@ -322,7 +329,7 @@ func TestSyncer_ManualFlush_TimeBased(t *testing.T) {
 // TestSyncer_ManualFlush_Stats verifies that manual stats flushing works.
 func TestSyncer_ManualFlush_Stats(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	config.StatsFlushInterval = 100 * time.Millisecond
 	config.StatsFlushThreshold = 1000 // High threshold - won't trigger
 	syncer, _ := NewSyncer(config, logger.Logger())
@@ -334,8 +341,8 @@ func TestSyncer_ManualFlush_Stats(t *testing.T) {
 	// Buffer 5 stats (below threshold)
 	for i := 0; i < 5; i++ {
 		stat := SchedulerIterationStats{
-			Timestamp:               time.Now(),
-			ActiveOrchestratorCount: i,
+			Timestamp: time.Now(),
+			Value:     i,
 		}
 		syncer.BufferStats(stat)
 	}
@@ -359,7 +366,7 @@ func TestSyncer_ManualFlush_Stats(t *testing.T) {
 // TestSyncer_JobRunSyncer_WriteSuccess verifies that job run updates are successfully written to the database.
 func TestSyncer_JobRunSyncer_WriteSuccess(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	syncer, _ := NewSyncer(config, logger.Logger())
 
 	mockDB := testutil.NewMockDB()
@@ -398,7 +405,7 @@ func TestSyncer_JobRunSyncer_WriteSuccess(t *testing.T) {
 // TestSyncer_JobRunSyncer_WriteFailure verifies that database write errors are logged appropriately.
 func TestSyncer_JobRunSyncer_WriteFailure(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	syncer, _ := NewSyncer(config, logger.Logger())
 
 	mockDB := testutil.NewMockDB()
@@ -437,7 +444,7 @@ func TestSyncer_JobRunSyncer_WriteFailure(t *testing.T) {
 // TestSyncer_StatsSyncer_WriteFailure verifies that stats database write errors are logged appropriately.
 func TestSyncer_StatsSyncer_WriteFailure(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	syncer, _ := NewSyncer(config, logger.Logger())
 
 	mockDB := testutil.NewMockDB()
@@ -447,10 +454,10 @@ func TestSyncer_StatsSyncer_WriteFailure(t *testing.T) {
 
 	// Send stats to channel
 	statsUpdate := StatsUpdate{
-		Stats: []SchedulerIterationStats{
-			{
-				Timestamp:               time.Now(),
-				ActiveOrchestratorCount: 1,
+		Stats: []interface{}{
+			SchedulerIterationStats{
+				Timestamp: time.Now(),
+				Value:     1,
 			},
 		},
 	}
@@ -472,7 +479,7 @@ func TestSyncer_StatsSyncer_WriteFailure(t *testing.T) {
 // TestSyncer_Shutdown_FlushesAll verifies that all buffered data is flushed during shutdown.
 func TestSyncer_Shutdown_FlushesAll(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	syncer, _ := NewSyncer(config, logger.Logger())
 
 	mockDB := testutil.NewMockDB()
@@ -490,8 +497,8 @@ func TestSyncer_Shutdown_FlushesAll(t *testing.T) {
 	// Buffer 10 stats
 	for i := 0; i < 10; i++ {
 		stat := SchedulerIterationStats{
-			Timestamp:               time.Now(),
-			ActiveOrchestratorCount: i,
+			Timestamp: time.Now(),
+			Value:     i,
 		}
 		syncer.BufferStats(stat)
 	}
@@ -516,7 +523,7 @@ func TestSyncer_Shutdown_FlushesAll(t *testing.T) {
 // TestSyncer_Shutdown_DrainChannels verifies that shutdown drains all pending channel items before exiting.
 func TestSyncer_Shutdown_DrainChannels(t *testing.T) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
+	config := DefaultConfig()
 	config.JobRunChannelSize = 100
 	syncer, _ := NewSyncer(config, logger.Logger())
 

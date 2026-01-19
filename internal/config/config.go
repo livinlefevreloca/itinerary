@@ -8,13 +8,14 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/scheduler"
+	"github.com/livinlefevreloca/itinerary/internal/syncer"
 )
 
 // Config represents the application configuration
 type Config struct {
 	Database  db.Config                 `toml:"database"`
 	Scheduler scheduler.SchedulerConfig `toml:"scheduler"`
-	Syncer    scheduler.SyncerConfig    `toml:"syncer"`
+	Syncer    syncer.Config             `toml:"syncer"`
 	HTTP      HTTPConfig                `toml:"http"`
 	Metrics   MetricsConfig             `toml:"metrics"`
 	Logging   LoggingConfig             `toml:"logging"`
@@ -54,7 +55,7 @@ func DefaultConfig() *Config {
 			SkipMigrations:  false,
 		},
 		Scheduler: scheduler.DefaultSchedulerConfig(),
-		Syncer:    scheduler.DefaultSyncerConfig(),
+		Syncer:    syncer.DefaultConfig(),
 		HTTP: HTTPConfig{
 			Enabled: true,
 			Address: "0.0.0.0",

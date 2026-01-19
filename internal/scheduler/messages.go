@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/livinlefevreloca/itinerary/internal/inbox"
+	"github.com/livinlefevreloca/itinerary/internal/syncer"
 )
 
 // InboxMessage is the container for all messages sent to the scheduler
@@ -122,19 +123,7 @@ type GetStatsMsg struct{}
 type StatsResponse struct {
 	SchedulerStats SchedulerStats
 	InboxStats     inbox.Stats
-	SyncerStats    SyncerStats
-}
-
-// JobRunUpdate represents a database update for a job run
-type JobRunUpdate struct {
-	UpdateID    string // UUID for idempotent database writes
-	RunID       string // Deterministic format: "jobID:unixTimestamp"
-	JobID       string
-	ScheduledAt time.Time
-	CompletedAt time.Time
-	Status      string
-	Success     bool
-	Error       error
+	SyncerStats    syncer.Stats
 }
 
 // SchedulerIterationStats captures metrics from a single scheduler iteration

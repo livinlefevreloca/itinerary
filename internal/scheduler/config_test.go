@@ -3,6 +3,9 @@ package scheduler
 import (
 	"testing"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/syncer"
+	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
 // =============================================================================
@@ -81,8 +84,9 @@ func TestDefaultSyncerConfig(t *testing.T) {
 		t.Error("StatsFlushInterval must be positive")
 	}
 
-	// Verify defaults pass validation
-	err := validateSyncerConfig(config)
+	// Verify defaults pass validation by creating a syncer
+	logger := testutil.NewTestLogger()
+	_, err := syncer.NewSyncer(config, logger.Logger())
 	if err != nil {
 		t.Errorf("default syncer config should pass validation, got error: %v", err)
 	}
@@ -175,7 +179,8 @@ func TestValidateSyncerConfig_ZeroMaxBufferedJobRunUpdates(t *testing.T) {
 	config := DefaultSyncerConfig()
 	config.MaxBufferedJobRunUpdates = 0
 
-	err := validateSyncerConfig(config)
+	logger := testutil.NewTestLogger()
+	_, err := syncer.NewSyncer(config, logger.Logger())
 	if err == nil {
 		t.Error("expected error for zero MaxBufferedJobRunUpdates")
 	}

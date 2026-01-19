@@ -1,4 +1,4 @@
-package scheduler
+package syncer
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 // Syncer handles all database write operations and buffering
 type Syncer struct {
 	// Configuration
-	config SyncerConfig
+	config Config
 	logger *slog.Logger
 
 	// Job run update buffering
@@ -19,7 +19,7 @@ type Syncer struct {
 	lastJobRunFlush    time.Time
 
 	// Stats buffering
-	statsBuffer    []SchedulerIterationStats
+	statsBuffer    []interface{}
 	statsChannel   chan StatsUpdate
 	lastStatsFlush time.Time
 
@@ -28,15 +28,9 @@ type Syncer struct {
 	wg       sync.WaitGroup // Tracks background goroutines (syncers only)
 }
 
-// SyncerStats provides current syncer buffer statistics
-type SyncerStats struct {
-	BufferedJobRunUpdates int
-	BufferedStats         int
-}
-
-// NewSyncer creates a new syncer with the specified configuration
-func NewSyncer(config SyncerConfig, logger *slog.Logger) (*Syncer, error) {
-	if err := validateSyncerConfig(config); err != nil {
+// New creates a new syncer with the specified configuration
+func NewSyncer(config Config, logger *slog.Logger) (*Syncer, error) {
+	if err := validateConfig(config); err != nil {
 		return nil, err
 	}
 
@@ -46,7 +40,7 @@ func NewSyncer(config SyncerConfig, logger *slog.Logger) (*Syncer, error) {
 		jobRunUpdateBuffer: make([]JobRunUpdate, 0),
 		jobRunChannel:      make(chan JobRunUpdate, config.JobRunChannelSize),
 		lastJobRunFlush:    time.Now(),
-		statsBuffer:        make([]SchedulerIterationStats, 0),
+		statsBuffer:        make([]interface{}, 0),
 		statsChannel:       make(chan StatsUpdate, config.StatsChannelSize),
 		lastStatsFlush:     time.Now(),
 		shutdown:           make(chan struct{}),
@@ -89,8 +83,8 @@ func (s *Syncer) FlushJobRunUpdates() error {
 	return nil
 }
 
-// BufferStats adds iteration stats to the buffer
-func (s *Syncer) BufferStats(stats SchedulerIterationStats) {
+// BufferStats adds stats to the buffer
+func (s *Syncer) BufferStats(stats interface{}) {
 	s.statsBuffer = append(s.statsBuffer, stats)
 }
 
@@ -107,7 +101,7 @@ func (s *Syncer) FlushStats() error {
 
 	select {
 	case s.statsChannel <- update:
-		s.statsBuffer = make([]SchedulerIterationStats, 0)
+		s.statsBuffer = make([]interface{}, 0)
 		s.lastStatsFlush = time.Now()
 		return nil
 	default:
@@ -116,11 +110,26 @@ func (s *Syncer) FlushStats() error {
 }
 
 // GetStats returns current syncer statistics
-func (s *Syncer) GetStats() SyncerStats {
-	return SyncerStats{
+func (s *Syncer) GetStats() Stats {
+	return Stats{
 		BufferedJobRunUpdates: len(s.jobRunUpdateBuffer),
 		BufferedStats:         len(s.statsBuffer),
 	}
+}
+
+// GetConfig returns the syncer configuration
+func (s *Syncer) GetConfig() Config {
+	return s.config
+}
+
+// GetLastJobRunFlushTime returns the timestamp of the last job run flush
+func (s *Syncer) GetLastJobRunFlushTime() time.Time {
+	return s.lastJobRunFlush
+}
+
+// GetLastStatsFlushTime returns the timestamp of the last stats flush
+func (s *Syncer) GetLastStatsFlushTime() time.Time {
+	return s.lastStatsFlush
 }
 
 // Start launches background goroutines for syncing

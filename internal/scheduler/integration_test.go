@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/syncer"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -59,7 +60,7 @@ func TestIntegration_ScheduleAndExecuteJob(t *testing.T) {
 	// Verify update contains expected job
 	foundJob1 := false
 	for _, update := range updates {
-		if jobUpdate, ok := update.(JobRunUpdate); ok {
+		if jobUpdate, ok := update.(syncer.JobRunUpdate); ok {
 			if jobUpdate.JobID == "job1" {
 				foundJob1 = true
 				break
@@ -114,7 +115,7 @@ func TestIntegration_MultipleJobsOverlapping(t *testing.T) {
 	jobsSeen := make(map[string]bool)
 
 	for _, update := range updates {
-		if jobUpdate, ok := update.(JobRunUpdate); ok {
+		if jobUpdate, ok := update.(syncer.JobRunUpdate); ok {
 			jobsSeen[jobUpdate.JobID] = true
 		}
 	}
@@ -180,7 +181,7 @@ func TestIntegration_HeartbeatOrphaning(t *testing.T) {
 	foundOrphaned := false
 	updates := mockDB.GetWrittenUpdates()
 	for _, update := range updates {
-		if jobUpdate, ok := update.(JobRunUpdate); ok {
+		if jobUpdate, ok := update.(syncer.JobRunUpdate); ok {
 			if jobUpdate.Status == "orphaned" {
 				foundOrphaned = true
 				break
@@ -228,7 +229,7 @@ func TestIntegration_ShutdownWithActiveJobs(t *testing.T) {
 
 	// Buffer some updates
 	for i := 0; i < 50; i++ {
-		update := JobRunUpdate{
+		update := syncer.JobRunUpdate{
 			UpdateID: fmt.Sprintf("update-%d", i),
 			RunID:    fmt.Sprintf("run-%d", i),
 		}

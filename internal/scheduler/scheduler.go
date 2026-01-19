@@ -9,6 +9,7 @@ import (
 	"github.com/livinlefevreloca/itinerary/internal/cron"
 	"github.com/livinlefevreloca/itinerary/internal/inbox"
 	"github.com/livinlefevreloca/itinerary/internal/scheduler/index"
+	"github.com/livinlefevreloca/itinerary/internal/syncer"
 )
 
 // Scheduler is the main scheduler component that coordinates all job orchestrators
@@ -28,7 +29,7 @@ type Scheduler struct {
 
 	// Communication
 	inbox  *inbox.Inbox[InboxMessage]
-	syncer *Syncer
+	syncer *syncer.Syncer
 
 	// Control
 	shutdown         chan struct{}
@@ -36,7 +37,7 @@ type Scheduler struct {
 }
 
 // NewScheduler creates a new scheduler instance with validated configuration
-func NewScheduler(config SchedulerConfig, syncerConfig SyncerConfig, db interface{}, logger *slog.Logger) (*Scheduler, error) {
+func NewScheduler(config SchedulerConfig, syncerConfig syncer.Config, db interface{}, logger *slog.Logger) (*Scheduler, error) {
 	// 1. Validate configuration
 	if err := validateConfig(config); err != nil {
 		return nil, err
@@ -46,7 +47,7 @@ func NewScheduler(config SchedulerConfig, syncerConfig SyncerConfig, db interfac
 	inboxInstance := inbox.New[InboxMessage](config.InboxBufferSize, config.InboxSendTimeout, logger)
 
 	// 3. Create syncer
-	syncer, err := NewSyncer(syncerConfig, logger)
+	syncerInstance, err := syncer.NewSyncer(syncerConfig, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create syncer: %w", err)
 	}
@@ -58,7 +59,7 @@ func NewScheduler(config SchedulerConfig, syncerConfig SyncerConfig, db interfac
 		index:               index.NewScheduledRunIndex([]index.ScheduledRun{}),
 		activeOrchestrators: make(map[string]*OrchestratorState),
 		inbox:               inboxInstance,
-		syncer:              syncer,
+		syncer:              syncerInstance,
 		shutdown:            make(chan struct{}),
 		rebuildIndexChan:    make(chan struct{}, 1),
 	}
@@ -174,7 +175,7 @@ func (s *Scheduler) scheduleOrchestrators(now time.Time) error {
 		go s.runOrchestrator(run.JobID, run.ScheduledAt, runID, cancelChan, configUpdateChan)
 
 		// Buffer job run update
-		if err := s.syncer.BufferJobRunUpdate(JobRunUpdate{
+		if err := s.syncer.BufferJobRunUpdate(syncer.JobRunUpdate{
 			UpdateID:    generateUpdateID(),
 			RunID:       runID,
 			JobID:       run.JobID,
@@ -262,7 +263,7 @@ func (s *Scheduler) handleOrchestratorStateChange(msg InboxMessage) {
 	state.Status = data.NewStatus
 
 	// Buffer update (ignore error - will be caught in scheduleOrchestrators)
-	s.syncer.BufferJobRunUpdate(JobRunUpdate{
+	s.syncer.BufferJobRunUpdate(syncer.JobRunUpdate{
 		UpdateID: generateUpdateID(),
 		RunID:    data.RunID,
 		Status:   data.NewStatus.String(),
@@ -282,7 +283,7 @@ func (s *Scheduler) handleOrchestratorComplete(msg InboxMessage) {
 	state.CompletedAt = data.CompletedAt
 
 	// Buffer update (ignore error - will be caught in scheduleOrchestrators)
-	s.syncer.BufferJobRunUpdate(JobRunUpdate{
+	s.syncer.BufferJobRunUpdate(syncer.JobRunUpdate{
 		UpdateID:    generateUpdateID(),
 		RunID:       data.RunID,
 		CompletedAt: data.CompletedAt,
@@ -305,7 +306,7 @@ func (s *Scheduler) handleOrchestratorFailed(msg InboxMessage) {
 	state.CompletedAt = data.CompletedAt
 
 	// Buffer update (ignore error - will be caught in scheduleOrchestrators)
-	s.syncer.BufferJobRunUpdate(JobRunUpdate{
+	s.syncer.BufferJobRunUpdate(syncer.JobRunUpdate{
 		UpdateID:    generateUpdateID(),
 		RunID:       data.RunID,
 		CompletedAt: data.CompletedAt,
@@ -450,7 +451,7 @@ func (s *Scheduler) checkHeartbeats(now time.Time) {
 				state.CompletedAt = now
 
 				// Buffer update
-				s.syncer.BufferJobRunUpdate(JobRunUpdate{
+				s.syncer.BufferJobRunUpdate(syncer.JobRunUpdate{
 					UpdateID:    generateUpdateID(),
 					RunID:       runID,
 					JobID:       state.JobID,
@@ -512,11 +513,11 @@ func (s *Scheduler) recordIterationStats(start time.Time, messagesProcessed int)
 
 // flushBuffers checks time and size thresholds and flushes buffers when needed
 func (s *Scheduler) flushBuffers(now time.Time) {
-	syncerConfig := s.syncer.config
+	syncerConfig := s.syncer.GetConfig()
 	syncerStats := s.syncer.GetStats()
 
 	// Check job run update flush thresholds (time OR size)
-	timeSinceJobRunFlush := now.Sub(s.syncer.lastJobRunFlush)
+	timeSinceJobRunFlush := now.Sub(s.syncer.GetLastJobRunFlushTime())
 	shouldFlushJobRuns := timeSinceJobRunFlush >= syncerConfig.JobRunFlushInterval ||
 		syncerStats.BufferedJobRunUpdates >= syncerConfig.JobRunFlushThreshold
 
@@ -530,7 +531,7 @@ func (s *Scheduler) flushBuffers(now time.Time) {
 	}
 
 	// Check stats flush thresholds (time OR size)
-	timeSinceStatsFlush := now.Sub(s.syncer.lastStatsFlush)
+	timeSinceStatsFlush := now.Sub(s.syncer.GetLastStatsFlushTime())
 	shouldFlushStats := timeSinceStatsFlush >= syncerConfig.StatsFlushInterval ||
 		syncerStats.BufferedStats >= syncerConfig.StatsFlushThreshold
 
