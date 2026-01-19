@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/inbox"
 	"github.com/livinlefevreloca/itinerary/internal/scheduler/index"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
@@ -27,7 +28,7 @@ func BenchmarkGenerateRunID(b *testing.B) {
 // BenchmarkInbox_SendReceive measures inbox send and receive throughput.
 func BenchmarkInbox_SendReceive(b *testing.B) {
 	logger := testutil.NewTestLogger()
-	inbox := NewInbox(10000, 100*time.Millisecond, logger.Logger())
+	inboxInstance := inbox.New[InboxMessage](10000, 100*time.Millisecond, logger.Logger())
 
 	msg := InboxMessage{
 		Type: MsgShutdown,
@@ -35,8 +36,8 @@ func BenchmarkInbox_SendReceive(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		inbox.Send(msg)
-		inbox.TryReceive()
+		inboxInstance.Send(msg)
+		inboxInstance.TryReceive()
 	}
 }
 
@@ -344,7 +345,7 @@ type BenchmarkT interface {
 }
 
 func createBenchScheduler(t BenchmarkT, config SchedulerConfig, syncerConfig SyncerConfig, logger *testutil.TestLogger) *Scheduler {
-	inbox := NewInbox(config.InboxBufferSize, config.InboxSendTimeout, logger.Logger())
+	inboxInstance := inbox.New[InboxMessage](config.InboxBufferSize, config.InboxSendTimeout, logger.Logger())
 	syncer, _ := NewSyncer(syncerConfig, logger.Logger())
 
 	return &Scheduler{
@@ -352,7 +353,7 @@ func createBenchScheduler(t BenchmarkT, config SchedulerConfig, syncerConfig Syn
 		logger:  logger.Logger(),
 		index:               nil,
 		activeOrchestrators: make(map[string]*OrchestratorState),
-		inbox:               inbox,
+		inbox:               inboxInstance,
 		syncer:              syncer,
 		shutdown:            make(chan struct{}),
 		rebuildIndexChan:    make(chan struct{}, 1),

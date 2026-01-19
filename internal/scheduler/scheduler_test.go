@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/inbox"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -681,7 +682,7 @@ func TestScheduler_CleanupOrchestrators_SkipsActive(t *testing.T) {
 // Helper functions
 
 func createTestScheduler(t *testing.T, config SchedulerConfig, syncerConfig SyncerConfig, logger *testutil.TestLogger) *Scheduler {
-	inbox := NewInbox(config.InboxBufferSize, config.InboxSendTimeout, logger.Logger())
+	inboxInstance := inbox.New[InboxMessage](config.InboxBufferSize, config.InboxSendTimeout, logger.Logger())
 	syncer, _ := NewSyncer(syncerConfig, logger.Logger())
 
 	return &Scheduler{
@@ -689,7 +690,7 @@ func createTestScheduler(t *testing.T, config SchedulerConfig, syncerConfig Sync
 		logger:  logger.Logger(),
 		index:               nil, // Not needed for most tests
 		activeOrchestrators: make(map[string]*OrchestratorState),
-		inbox:               inbox,
+		inbox:               inboxInstance,
 		syncer:              syncer,
 		shutdown:            make(chan struct{}),
 		rebuildIndexChan:    make(chan struct{}, 1),

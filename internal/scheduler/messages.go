@@ -1,6 +1,10 @@
 package scheduler
 
-import "time"
+import (
+	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/inbox"
+)
 
 // InboxMessage is the container for all messages sent to the scheduler
 type InboxMessage struct {
@@ -117,7 +121,7 @@ type GetStatsMsg struct{}
 // StatsResponse is the response to GetStatsMsg
 type StatsResponse struct {
 	SchedulerStats SchedulerStats
-	InboxStats     InboxStats
+	InboxStats     inbox.Stats
 	SyncerStats    SyncerStats
 }
 

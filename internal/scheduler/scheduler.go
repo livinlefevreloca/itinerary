@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/livinlefevreloca/itinerary/internal/cron"
+	"github.com/livinlefevreloca/itinerary/internal/inbox"
 	"github.com/livinlefevreloca/itinerary/internal/scheduler/index"
 )
 
@@ -26,7 +27,7 @@ type Scheduler struct {
 	missedHeartbeatCount   int
 
 	// Communication
-	inbox  *Inbox
+	inbox  *inbox.Inbox[InboxMessage]
 	syncer *Syncer
 
 	// Control
@@ -42,7 +43,7 @@ func NewScheduler(config SchedulerConfig, syncerConfig SyncerConfig, db interfac
 	}
 
 	// 2. Create inbox
-	inbox := NewInbox(config.InboxBufferSize, config.InboxSendTimeout, logger)
+	inboxInstance := inbox.New[InboxMessage](config.InboxBufferSize, config.InboxSendTimeout, logger)
 
 	// 3. Create syncer
 	syncer, err := NewSyncer(syncerConfig, logger)
@@ -56,7 +57,7 @@ func NewScheduler(config SchedulerConfig, syncerConfig SyncerConfig, db interfac
 		logger:              logger,
 		index:               index.NewScheduledRunIndex([]index.ScheduledRun{}),
 		activeOrchestrators: make(map[string]*OrchestratorState),
-		inbox:               inbox,
+		inbox:               inboxInstance,
 		syncer:              syncer,
 		shutdown:            make(chan struct{}),
 		rebuildIndexChan:    make(chan struct{}, 1),
@@ -402,7 +403,7 @@ func (s *Scheduler) handleGetStats(msg InboxMessage) {
 			ActiveOrchestratorCount: len(s.activeOrchestrators),
 			IndexSize:               s.index.Len(),
 		},
-		InboxStats:  s.inbox.Stats(),
+		InboxStats:  s.inbox.GetStats(),
 		SyncerStats: s.syncer.GetStats(),
 	}
 
@@ -499,7 +500,7 @@ func (s *Scheduler) recordIterationStats(start time.Time, messagesProcessed int)
 		IterationDuration:       time.Since(start),
 		ActiveOrchestratorCount: len(s.activeOrchestrators),
 		IndexSize:               s.index.Len(),
-		InboxDepth:              s.inbox.Stats().CurrentDepth,
+		InboxDepth:              s.inbox.GetStats().CurrentDepth,
 		MessagesProcessed:       messagesProcessed,
 		IndexBuildCount:         s.indexBuildCount,
 		LastIndexBuildDuration:  s.lastIndexBuildDuration,
