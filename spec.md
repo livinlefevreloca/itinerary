@@ -451,7 +451,9 @@ itinerary \
    - constraints_checked
    - actions_taken
   syncer_stats (formerly writer_stats)
-    - stats_period_id
+    - stats_period_id (pk)
+    - start_time
+    - end_time
     - total_writes
     - writes_succeeded
     - writes_failed
@@ -470,6 +472,25 @@ itinerary \
     - avg_time_in_inbox
     - max_time_in_inbox
     - min_time_in_inbox
+  stats_collector_stats
+    - stats_period_id (pk)
+    - start_time
+    - end_time
+    - messages_received
+    - messages_processed
+    - scheduler_messages
+    - orchestrator_messages
+    - syncer_messages
+    - webhook_messages
+    - periods_completed
+    - database_flushes
+    - flush_errors
+    - avg_inbox_length
+    - max_inbox_length
+    - min_inbox_length
+    - avg_processing_time (microseconds)
+    - max_processing_time (microseconds)
+    - min_processing_time (microseconds)
   webhook_deliveries (future)
     - id pk
     - run_id (fk job_runs.run_id)
@@ -509,7 +530,15 @@ itinerary \
 * idx_action_runs_run_id - index on action_runs.run_id (FK)
 * idx_action_runs_action_type_id - index on action_runs.action_type_id (FK)
 * idx_action_runs_constraint_violation_id - index on action_runs.constraint_violation_id (FK)
+* idx_scheduler_stats_start_time - index on scheduler_stats.start_time
+* idx_scheduler_stats_end_time - index on scheduler_stats.end_time
 * idx_orchestrator_stats_stats_period_id - index on orchestrator_stats.stats_period_id (FK)
+* idx_syncer_stats_start_time - index on syncer_stats.start_time
+* idx_syncer_stats_end_time - index on syncer_stats.end_time
+* idx_stats_collector_stats_start_time - index on stats_collector_stats.start_time
+* idx_stats_collector_stats_end_time - index on stats_collector_stats.end_time
+* idx_webhook_handler_stats_start_time - index on webhook_handler_stats.start_time (future)
+* idx_webhook_handler_stats_end_time - index on webhook_handler_stats.end_time (future)
 * idx_webhook_deliveries_run_id - index on webhook_deliveries.run_id (FK) (future)
 * idx_webhook_deliveries_created_at - index on webhook_deliveries.created_at (future)
 
