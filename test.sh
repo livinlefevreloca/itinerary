@@ -188,8 +188,8 @@ while [[ $# -gt 0 ]]; do
         --test)
             ACTION="test"
             shift
-            # Check if next arg is a pattern (not a flag)
-            if [[ $# -gt 0 && ! $1 =~ ^-- ]]; then
+            # Check if next arg is a pattern (not a flag or directory)
+            if [[ $# -gt 0 && ! $1 =~ ^-- && ! -d "$1" ]]; then
                 ACTION_ARG="$1"
                 shift
             fi
@@ -197,8 +197,8 @@ while [[ $# -gt 0 ]]; do
         --bench)
             ACTION="bench"
             shift
-            # Check if next arg is a pattern (not a flag)
-            if [[ $# -gt 0 && ! $1 =~ ^-- ]]; then
+            # Check if next arg is a pattern (not a flag or directory)
+            if [[ $# -gt 0 && ! $1 =~ ^-- && ! -d "$1" ]]; then
                 ACTION_ARG="$1"
                 shift
             fi
@@ -233,6 +233,8 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+echo "directories: ${DIRECTORIES[*]}"
 
 # If no directories specified, use current directory
 if [[ ${#DIRECTORIES[@]} -eq 0 ]]; then

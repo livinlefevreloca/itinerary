@@ -115,11 +115,27 @@ func benchmarkProcessInbox(b *testing.B, messageCount int) {
 
 	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
-	// Prepare messages
+	// Create a test orchestrator for heartbeat messages
+	now := time.Now()
+	runID := "benchmark-job:1704067200"
+	scheduler.activeOrchestrators[runID] = &OrchestratorState{
+		RunID:            runID,
+		JobID:            "benchmark-job",
+		Status:           OrchestratorRunning,
+		ScheduledAt:      now,
+		LastHeartbeat:    now,
+		MissedHeartbeats: 0,
+	}
+
+	// Prepare messages - use heartbeat messages to avoid channel close panics
 	messages := make([]InboxMessage, messageCount)
 	for i := 0; i < messageCount; i++ {
 		messages[i] = InboxMessage{
-			Type: MsgShutdown,
+			Type: MsgOrchestratorHeartbeat,
+			Data: OrchestratorHeartbeatMsg{
+				RunID:     runID,
+				Timestamp: now,
+			},
 		}
 	}
 

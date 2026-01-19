@@ -8,47 +8,47 @@ import (
 // SchedulerConfig defines configuration for the scheduler's main loop and orchestrator management
 type SchedulerConfig struct {
 	// How far ahead to launch orchestrators before job start time
-	PreScheduleInterval time.Duration
+	PreScheduleInterval time.Duration `toml:"pre_schedule_interval"`
 
 	// How often the index builder queries DB and rebuilds index
-	IndexRebuildInterval time.Duration
+	IndexRebuildInterval time.Duration `toml:"index_rebuild_interval"`
 
 	// How far ahead to calculate scheduled runs
-	LookaheadWindow time.Duration
+	LookaheadWindow time.Duration `toml:"lookahead_window"`
 
 	// How far back to include runs (prevents missing near-past jobs)
-	GracePeriod time.Duration
+	GracePeriod time.Duration `toml:"grace_period"`
 
 	// Main loop iteration interval
-	LoopInterval time.Duration
+	LoopInterval time.Duration `toml:"loop_interval"`
 
 	// Inbox buffer size
-	InboxBufferSize int
+	InboxBufferSize int `toml:"inbox_buffer_size"`
 
 	// Timeout for sending to inbox
-	InboxSendTimeout time.Duration
+	InboxSendTimeout time.Duration `toml:"inbox_send_timeout"`
 
 	// Orchestrator heartbeat configuration
-	OrchestratorHeartbeatInterval   time.Duration
-	MaxMissedOrchestratorHeartbeats int
+	OrchestratorHeartbeatInterval   time.Duration `toml:"orchestrator_heartbeat_interval"`
+	MaxMissedOrchestratorHeartbeats int           `toml:"max_missed_orchestrator_heartbeats"`
 }
 
 // SyncerConfig defines configuration for the syncer's database write buffering
 type SyncerConfig struct {
 	// Maximum buffered job run updates before stopping
-	MaxBufferedJobRunUpdates int
+	MaxBufferedJobRunUpdates int `toml:"max_buffered_job_run_updates"`
 
 	// Channel buffer sizes
-	JobRunChannelSize int
-	StatsChannelSize  int
+	JobRunChannelSize int `toml:"job_run_channel_size"`
+	StatsChannelSize  int `toml:"stats_channel_size"`
 
 	// Job run flushing - dual mechanism (size OR time triggers flush)
-	JobRunFlushThreshold int
-	JobRunFlushInterval  time.Duration
+	JobRunFlushThreshold int           `toml:"job_run_flush_threshold"`
+	JobRunFlushInterval  time.Duration `toml:"job_run_flush_interval"`
 
 	// Stats flushing - dual mechanism (size OR time triggers flush)
-	StatsFlushThreshold int
-	StatsFlushInterval  time.Duration
+	StatsFlushThreshold int           `toml:"stats_flush_threshold"`
+	StatsFlushInterval  time.Duration `toml:"stats_flush_interval"`
 }
 
 // DefaultSchedulerConfig returns OLTP-friendly scheduler configuration defaults

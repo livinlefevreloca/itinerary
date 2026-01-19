@@ -1,0 +1,91 @@
+# Itinerary Configuration File
+# Copy this file to config.toml and customize as needed
+
+[database]
+# Database driver: sqlite3, postgres, or mysql
+driver = "sqlite3"
+
+# Database connection string
+# SQLite: file path or ":memory:"
+# PostgreSQL: "postgres://user:pass@localhost/dbname?sslmode=disable"
+# MySQL: "user:pass@tcp(localhost:3306)/dbname"
+dsn = "itinerary.db"
+
+# Connection pool settings
+max_open_conns = 25
+max_idle_conns = 5
+conn_max_lifetime = "5m"
+conn_max_idle_time = "5m"
+
+# Migrations settings
+migrations_dir = "migrations"
+skip_migrations = false
+
+[scheduler]
+# Main loop iteration interval
+loop_interval = "1s"
+
+# How often the index builder queries DB and rebuilds index
+index_rebuild_interval = "1m"
+
+# How far ahead to launch orchestrators before job start time
+pre_schedule_interval = "10s"
+
+# How far ahead to calculate scheduled runs
+lookahead_window = "10m"
+
+# Grace period for late jobs before marking them as missed
+grace_period = "30s"
+
+# Inbox buffer size
+inbox_buffer_size = 10000
+
+# Timeout for sending to inbox
+inbox_send_timeout = "5s"
+
+# Orchestrator heartbeat configuration
+orchestrator_heartbeat_interval = "10s"
+max_missed_orchestrator_heartbeats = 3
+
+[syncer]
+# Maximum buffered job run updates before stopping
+max_buffered_job_run_updates = 10000
+
+# Channel buffer sizes
+job_run_channel_size = 200
+stats_channel_size = 100
+
+# Job run flushing (size OR time triggers flush)
+job_run_flush_threshold = 100
+job_run_flush_interval = "1s"
+
+# Stats flushing (size OR time triggers flush)
+stats_flush_threshold = 50
+stats_flush_interval = "5s"
+
+[http]
+# Enable HTTP API server
+enabled = true
+
+# Address to bind to (0.0.0.0 for all interfaces)
+address = "0.0.0.0"
+
+# Port for HTTP API
+port = 8080
+
+[metrics]
+# Enable metrics/monitoring endpoint
+enabled = true
+
+# Address to bind to
+address = "0.0.0.0"
+
+# Port for metrics endpoint
+port = 9090
+
+[logging]
+# Log level: debug, info, warn, error
+level = "info"
+
+# Log format: text or json
+format = "text"
