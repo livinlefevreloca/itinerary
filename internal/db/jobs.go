@@ -574,3 +574,4 @@ func (db *DB) GetActionRunsByType(actionTypeID int, limit int) ([]ActionRun, err
 
 	return actionRuns, nil
 }
+
