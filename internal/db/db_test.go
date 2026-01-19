@@ -838,14 +838,13 @@ func TestCreateConstraintViolation(t *testing.T) {
 		t.Fatalf("CreateJobRun failed: %v", err)
 	}
 
-	actionTaken := "retry"
+	details := `{"message": "Job exceeded maxAllowedRunTime", "threshold": "2h"}`
 	violation := &ConstraintViolation{
 		ID:               "violation-1",
 		RunID:            run.RunID,
 		ConstraintTypeID: 7, // maxAllowedRunTime
 		ViolationTime:    time.Now(),
-		ActionTaken:      &actionTaken,
-		Details:          `{"message": "Job exceeded maxAllowedRunTime", "threshold": "2h"}`,
+		Details:          &details,
 	}
 
 	if err := db.CreateConstraintViolation(violation); err != nil {
@@ -864,22 +863,21 @@ func TestGetConstraintViolations(t *testing.T) {
 	}
 
 	// Create multiple violations
-	actionTaken := "webhook"
+	details1 := `{"message": "Job exceeded maxExpectedRunTime"}`
+	details2 := `{"message": "Job exceeded maxAllowedRunTime"}`
 	violation1 := &ConstraintViolation{
 		ID:               "violation-1",
 		RunID:            run.RunID,
 		ConstraintTypeID: 6, // maxExpectedRunTime
 		ViolationTime:    time.Now(),
-		ActionTaken:      &actionTaken,
-		Details:          `{"message": "Job exceeded maxExpectedRunTime"}`,
+		Details:          &details1,
 	}
 	violation2 := &ConstraintViolation{
 		ID:               "violation-2",
 		RunID:            run.RunID,
 		ConstraintTypeID: 7, // maxAllowedRunTime
 		ViolationTime:    time.Now().Add(time.Minute),
-		ActionTaken:      &actionTaken,
-		Details:          `{"message": "Job exceeded maxAllowedRunTime"}`,
+		Details:          &details2,
 	}
 
 	if err := db.CreateConstraintViolation(violation1); err != nil {
@@ -910,22 +908,20 @@ func TestGetConstraintViolationsByType(t *testing.T) {
 	db.CreateJobRun(run1)
 	db.CreateJobRun(run2)
 
-	actionTaken := "killAllInstances"
+	details := `{"message": "Job exceeded maxAllowedRunTime"}`
 	violation1 := &ConstraintViolation{
 		ID:               "violation-1",
 		RunID:            run1.RunID,
 		ConstraintTypeID: 7, // maxAllowedRunTime
 		ViolationTime:    time.Now(),
-		ActionTaken:      &actionTaken,
-		Details:          `{"message": "Job exceeded maxAllowedRunTime"}`,
+		Details:          &details,
 	}
 	violation2 := &ConstraintViolation{
 		ID:               "violation-2",
 		RunID:            run2.RunID,
 		ConstraintTypeID: 7, // maxAllowedRunTime
 		ViolationTime:    time.Now().Add(time.Hour),
-		ActionTaken:      &actionTaken,
-		Details:          `{"message": "Job exceeded maxAllowedRunTime"}`,
+		Details:          &details,
 	}
 
 	db.CreateConstraintViolation(violation1)

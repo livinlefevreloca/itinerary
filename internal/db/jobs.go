@@ -359,8 +359,8 @@ func (db *DB) DeleteJobAction(id string) error {
 // CreateConstraintViolation records a constraint violation
 func (db *DB) CreateConstraintViolation(violation *ConstraintViolation) error {
 	query := `
-		INSERT INTO constraint_violations (id, run_id, constraint_type_id, violation_time, action_taken, details)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO constraint_violations (id, run_id, constraint_type_id, violation_time, details)
+		VALUES (?, ?, ?, ?, ?)
 	`
 
 	_, err := db.Exec(query,
@@ -368,7 +368,6 @@ func (db *DB) CreateConstraintViolation(violation *ConstraintViolation) error {
 		violation.RunID,
 		violation.ConstraintTypeID,
 		violation.ViolationTime,
-		violation.ActionTaken,
 		violation.Details,
 	)
 	return err
@@ -377,7 +376,7 @@ func (db *DB) CreateConstraintViolation(violation *ConstraintViolation) error {
 // GetConstraintViolations retrieves all violations for a run
 func (db *DB) GetConstraintViolations(runID string) ([]ConstraintViolation, error) {
 	query := `
-		SELECT id, run_id, constraint_type_id, violation_time, action_taken, details
+		SELECT id, run_id, constraint_type_id, violation_time, details
 		FROM constraint_violations
 		WHERE run_id = ?
 		ORDER BY violation_time DESC
@@ -397,7 +396,6 @@ func (db *DB) GetConstraintViolations(runID string) ([]ConstraintViolation, erro
 			&v.RunID,
 			&v.ConstraintTypeID,
 			&v.ViolationTime,
-			&v.ActionTaken,
 			&v.Details,
 		)
 		if err != nil {
@@ -420,7 +418,7 @@ func (db *DB) GetConstraintViolations(runID string) ([]ConstraintViolation, erro
 // GetConstraintViolationsByType retrieves violations for a specific constraint type
 func (db *DB) GetConstraintViolationsByType(constraintTypeID int, limit int) ([]ConstraintViolation, error) {
 	query := `
-		SELECT id, run_id, constraint_type_id, violation_time, action_taken, details
+		SELECT id, run_id, constraint_type_id, violation_time, details
 		FROM constraint_violations
 		WHERE constraint_type_id = ?
 		ORDER BY violation_time DESC
@@ -441,7 +439,6 @@ func (db *DB) GetConstraintViolationsByType(constraintTypeID int, limit int) ([]
 			&v.RunID,
 			&v.ConstraintTypeID,
 			&v.ViolationTime,
-			&v.ActionTaken,
 			&v.Details,
 		)
 		if err != nil {
@@ -459,4 +456,121 @@ func (db *DB) GetConstraintViolationsByType(constraintTypeID int, limit int) ([]
 	}
 
 	return violations, nil
+}
+// =============================================================================
+// Action Run Operations
+// =============================================================================
+
+// CreateActionRun records an action execution
+func (db *DB) CreateActionRun(actionRun *ActionRun) error {
+	query := `
+		INSERT INTO action_runs (id, run_id, action_type_id, trigger, constraint_violation_id, executed_at, success, error, details)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.Exec(query,
+		actionRun.ID,
+		actionRun.RunID,
+		actionRun.ActionTypeID,
+		actionRun.Trigger,
+		actionRun.ConstraintViolationID,
+		actionRun.ExecutedAt,
+		actionRun.Success,
+		actionRun.Error,
+		actionRun.Details,
+	)
+	return err
+}
+
+// GetActionRuns retrieves all action runs for a run
+func (db *DB) GetActionRuns(runID string) ([]ActionRun, error) {
+	query := `
+		SELECT id, run_id, action_type_id, trigger, constraint_violation_id, executed_at, success, error, details
+		FROM action_runs
+		WHERE run_id = ?
+		ORDER BY executed_at DESC
+	`
+
+	rows, err := db.Query(query, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var actionRuns []ActionRun
+	for rows.Next() {
+		var ar ActionRun
+		err := rows.Scan(
+			&ar.ID,
+			&ar.RunID,
+			&ar.ActionTypeID,
+			&ar.Trigger,
+			&ar.ConstraintViolationID,
+			&ar.ExecutedAt,
+			&ar.Success,
+			&ar.Error,
+			&ar.Details,
+		)
+		if err != nil {
+			return nil, err
+		}
+		actionRuns = append(actionRuns, ar)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if actionRuns == nil {
+		actionRuns = []ActionRun{}
+	}
+
+	return actionRuns, nil
+}
+
+// GetActionRunsByType retrieves action runs for a specific action type
+func (db *DB) GetActionRunsByType(actionTypeID int, limit int) ([]ActionRun, error) {
+	query := `
+		SELECT id, run_id, action_type_id, trigger, constraint_violation_id, executed_at, success, error, details
+		FROM action_runs
+		WHERE action_type_id = ?
+		ORDER BY executed_at DESC
+		LIMIT ?
+	`
+
+	rows, err := db.Query(query, actionTypeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var actionRuns []ActionRun
+	for rows.Next() {
+		var ar ActionRun
+		err := rows.Scan(
+			&ar.ID,
+			&ar.RunID,
+			&ar.ActionTypeID,
+			&ar.Trigger,
+			&ar.ConstraintViolationID,
+			&ar.ExecutedAt,
+			&ar.Success,
+			&ar.Error,
+			&ar.Details,
+		)
+		if err != nil {
+			return nil, err
+		}
+		actionRuns = append(actionRuns, ar)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if actionRuns == nil {
+		actionRuns = []ActionRun{}
+	}
+
+	return actionRuns, nil
 }
