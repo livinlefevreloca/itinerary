@@ -22,25 +22,29 @@ itinerary/
 │
 ├── internal/                # Private application packages
 │   ├── cron/               # Cron expression parser
-│   │   ├── cron-parser.md       # Component specification
-│   │   └── cron-parser-tests.md # Test specification
+│   │   ├── spec.md              # Component specification
+│   │   └── test_spec.md         # Test specification
 │   ├── db/                 # Database abstraction and operations
+│   │   ├── spec.md              # Component specification
+│   │   └── test_spec.md         # Test specification
 │   ├── inbox/              # Generic inbox for component communication
 │   ├── scheduler/          # Central scheduler component
-│   │   ├── scheduler.md         # Component specification
-│   │   ├── scheduler-tests.md   # Test specification
+│   │   ├── spec.md              # Component specification
+│   │   ├── test_spec.md         # Test specification
 │   │   └── index/          # Scheduled run index (lock-free atomic)
-│   │       ├── scheduled-run-index.md       # Component specification
-│   │       └── scheduled-run-index-tests.md # Test specification
+│   │       ├── spec.md              # Component specification
+│   │       └── test_spec.md         # Test specification
 │   ├── stats/              # Stats collector component
-│   │   ├── stats-collector.md       # Component specification
-│   │   └── stats-collector-tests.md # Test specification
+│   │   ├── spec.md              # Component specification
+│   │   └── test_spec.md         # Test specification
+│   ├── syncer/             # Database syncer component
+│   │   └── spec.md              # Component specification
 │   └── testutil/           # Shared test utilities and mocks
 │
 ├── tools/                  # Standalone tools
 │   └── migrator/           # Database migration tool
-│       ├── migrator.md          # Component specification
-│       └── migrator-tests.md    # Test specification
+│       ├── spec.md              # Component specification
+│       └── test_spec.md         # Test specification
 │
 ├── spec/                   # Specifications and UI mockups
 │   ├── components/         # Component specifications
@@ -220,8 +224,8 @@ The main loop maintains:
 ### Stats Collector
 * The Stats Collector is a standalone component that centralizes all statistics collection and database writing
 * See high-level specification: `spec/components/stats-collector.md`
-* See implementation specification: `internal/stats/stats-collector.md`
-* See test specification: `internal/stats/stats-collector-tests.md`
+* See implementation specification: `internal/stats/spec.md`
+* See test specification: `internal/stats/test_spec.md`
 * Key responsibilities:
   - Receive statistics from all components (scheduler, orchestrators, syncer, webhook handler)
   - Perform intermediate calculations and aggregations
