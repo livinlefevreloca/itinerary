@@ -59,9 +59,11 @@ const (
 ```go
 type SchedulerStatsData struct {
     Iterations          int
+    JobsRunning         int
     JobsRun             int
     LateJobs            int
     MissedJobs          int
+    MissedHeartbeats    int
     JobsCancelled       int
     InboxLength         int
     InboxEmptyTime      time.Duration
@@ -102,6 +104,23 @@ type WebhookStatsData struct {
     TotalRetries      int
     DeliveryTime      time.Duration
     InboxLength       int
+}
+```
+
+#### Stats Collector Stats
+The stats collector tracks stats about itself:
+```go
+type StatsCollectorStatsData struct {
+    MessagesReceived     int
+    MessagesProcessed    int
+    SchedulerMessages    int
+    OrchestratorMessages int
+    SyncerMessages       int
+    WebhookMessages      int
+    FlushCount           int
+    FlushErrors          int
+    InboxLength          int
+    ProcessingTime       time.Duration
 }
 ```
 
@@ -170,9 +189,11 @@ The main loop:
 ```go
 type SchedulerStatsAccumulator struct {
     Iterations       int
+    JobsRunning      int
     JobsRun          int
     LateJobs         int
     MissedJobs       int
+    MissedHeartbeats int
     JobsCancelled    int
 
     // Inbox metrics
@@ -262,16 +283,16 @@ This ensures all components use the same period IDs for the same time windows.
 
 ### Database Writes
 
-All writes use transactions for atomicity.
+All stats writes are insert-only operations. If a write is missed, it's acceptable.
 
 #### Scheduler Stats
 ```sql
 INSERT INTO scheduler_stats (
     stats_period_id, start_time, end_time,
-    iterations, run_jobs, late_jobs, missed_jobs, jobs_cancelled,
+    iterations, jobs_running, run_jobs, late_jobs, missed_jobs, missed_heartbeats, jobs_cancelled,
     min_inbox_length, max_inbox_length, avg_inbox_length,
     empty_inbox_time, avg_time_in_inbox, min_time_in_inbox, max_time_in_inbox
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 ```
 
 #### Orchestrator Stats (batch insert)
@@ -301,24 +322,12 @@ For any slice of integers or durations:
 func calculateMinMaxAvg[T constraints.Integer | constraints.Float](samples []T) (min, max T, avg float64)
 ```
 
-### Percentiles (future enhancement)
-```go
-func calculatePercentile[T constraints.Integer | constraints.Float](samples []T, percentile float64) T
-```
-
 ## Error Handling
 
 ### Database Write Failures
 - Log error with full context
-- Retry with exponential backoff (3 attempts)
-- If all retries fail, log critical error and continue
 - Don't block on failed writes
 - Stats are best-effort, not critical path
-
-### Memory Pressure
-- If accumulator samples exceed threshold (e.g., 10,000), force flush
-- Log warning about memory pressure
-- This prevents unbounded memory growth if database is down
 
 ### Inbox Full
 - Senders use timeout when sending
@@ -341,7 +350,6 @@ func calculatePercentile[T constraints.Integer | constraints.Float](samples []T,
 - Inbox is thread-safe via channels
 - Accumulators are only accessed by main loop (single goroutine)
 - No mutex needed for accumulators
-- Database writes use transactions
 
 ## Performance Characteristics
 
@@ -353,13 +361,6 @@ func calculatePercentile[T constraints.Integer | constraints.Float](samples []T,
 ### CPU Usage
 - Minimal CPU usage
 - Main work is during flush (calculations + database writes)
-- Expected: < 1% CPU utilization
-
-### Latency
-- Stats are not time-critical
-- Flush latency: < 100ms typical
-- Database write latency: < 500ms typical
-- Stats period: 30 seconds (configurable)
 
 ## Integration Points
 
@@ -413,7 +414,7 @@ statsCollector.Send(StatsMessage{
 
 ## Testing Strategy
 
-See `stats-collector-tests.md` for detailed test specifications.
+See `test_spec.md` for detailed test specifications.
 
 Key testing areas:
 - Message routing to correct accumulator
@@ -421,15 +422,6 @@ Key testing areas:
 - Period transitions
 - Flush triggers (threshold and timer)
 - Database writes
-- Error handling and retries
+- Error handling
 - Shutdown with pending stats
-- Memory limits
-
-## Future Enhancements
-
-1. **Percentile calculations** (p50, p95, p99)
-2. **Histogram buckets** for latency distributions
-3. **Real-time stats queries** via request/response pattern
-4. **Stats aggregation** across multiple periods
-5. **Stats export** to external systems (Prometheus, DataDog)
-6. **Alerting** based on stats thresholds
+- Stats collector self-monitoring
