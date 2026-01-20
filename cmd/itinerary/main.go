@@ -16,10 +16,6 @@ import (
 func main() {
 	// Parse command-line flags
 	configFile := flag.String("config", "", "Path to configuration file (TOML)")
-	dbDriver := flag.String("db-driver", "", "Database driver (sqlite3, postgres, mysql) [overrides config]")
-	dbDSN := flag.String("db-dsn", "", "Database connection string [overrides config]")
-	migrationsDir := flag.String("migrations-dir", "", "Path to migrations directory [overrides config]")
-	skipMigrations := flag.Bool("skip-migrations", false, "Skip running migrations on startup [overrides config]")
 	flag.Parse()
 
 	log.Println("Starting Itinerary Job Scheduler")
@@ -29,20 +25,6 @@ func main() {
 	cfg, err := config.LoadConfig(*configFile)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
-	}
-
-	// Apply command-line flag overrides
-	if *dbDriver != "" {
-		cfg.Database.Driver = *dbDriver
-	}
-	if *dbDSN != "" {
-		cfg.Database.DSN = *dbDSN
-	}
-	if *migrationsDir != "" {
-		cfg.Database.MigrationsDir = *migrationsDir
-	}
-	if *skipMigrations {
-		cfg.Database.SkipMigrations = true
 	}
 
 	// Validate configuration
