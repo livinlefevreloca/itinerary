@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,67 +18,86 @@ func main() {
 	configFile := flag.String("config", "", "Path to configuration file (TOML)")
 	flag.Parse()
 
-	log.Println("Starting Itinerary Job Scheduler")
+	// Initialize structured logger
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+
+	slog.Info("starting itinerary job scheduler")
 
 	// Load configuration
-	log.Println("Loading configuration...")
+	slog.Info("loading configuration", "config_file", *configFile)
 	cfg, err := config.LoadConfig(*configFile)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		slog.Error("failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
-		log.Fatalf("Invalid configuration: %v", err)
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(1)
 	}
 
 	// Log configuration summary
-	log.Printf("Database: %s (%s)", cfg.Database.Driver, cfg.Database.DSN)
-	log.Printf("Migrations: %s", cfg.Database.MigrationsDir)
+	slog.Info("database configuration",
+		"driver", cfg.Database.Driver,
+		"dsn", cfg.Database.DSN,
+		"migrations_dir", cfg.Database.MigrationsDir)
+
 	if cfg.HTTP.Enabled {
-		log.Printf("HTTP API: %s:%d", cfg.HTTP.Address, cfg.HTTP.Port)
+		slog.Info("http api enabled",
+			"address", cfg.HTTP.Address,
+			"port", cfg.HTTP.Port)
 	}
+
 	if cfg.Metrics.Enabled {
-		log.Printf("Metrics: %s:%d", cfg.Metrics.Address, cfg.Metrics.Port)
+		slog.Info("metrics enabled",
+			"address", cfg.Metrics.Address,
+			"port", cfg.Metrics.Port)
 	}
 
 	// Open database connection with pool settings
-	log.Printf("Connecting to database (%s)...", cfg.Database.Driver)
+	slog.Info("connecting to database", "driver", cfg.Database.Driver)
 	database, err := db.OpenWithConfig(cfg.Database)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		slog.Error("failed to connect to database", "error", err, "driver", cfg.Database.Driver)
+		os.Exit(1)
 	}
 	defer database.Close()
 
 	// Run migrations
 	if !cfg.Database.SkipMigrations {
-		log.Printf("Running migrations from %s...", cfg.Database.MigrationsDir)
+		slog.Info("running migrations", "migrations_dir", cfg.Database.MigrationsDir)
 		if err := migrator.RunMigrations(database.DB, cfg.Database.MigrationsDir); err != nil {
-			log.Fatalf("Failed to run migrations: %v", err)
+			slog.Error("failed to run migrations", "error", err, "migrations_dir", cfg.Database.MigrationsDir)
+			os.Exit(1)
 		}
 
 		// Get current schema version
 		version, err := migrator.GetCurrentVersion(database.DB)
 		if err != nil {
-			log.Fatalf("Failed to get schema version: %v", err)
+			slog.Error("failed to get schema version", "error", err)
+			os.Exit(1)
 		}
-		log.Printf("Database schema version: %d", version)
+		slog.Info("database schema ready", "version", version)
 	} else {
-		log.Println("Skipping migrations (configured to skip)")
+		slog.Info("skipping migrations", "reason", "configured to skip")
 	}
 
 	// TODO: Initialize scheduler with cfg.Scheduler
 	// TODO: Start HTTP server for API with cfg.HTTP
 	// TODO: Start metrics server with cfg.Metrics
 
-	log.Println("Itinerary is running. Press Ctrl+C to stop.")
+	slog.Info("itinerary is running")
 
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	log.Println("Shutting down gracefully...")
+	slog.Info("shutting down gracefully")
 	// TODO: Stop scheduler
 	// TODO: Stop HTTP server
 }
