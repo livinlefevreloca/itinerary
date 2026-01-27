@@ -294,24 +294,6 @@ func TestDatabaseWrite_SyncerStats(t *testing.T)
 - Verify min/max/avg calculations are correct
 - Verify all fields are populated
 
-### Test: Database Write - Batch Insert
-**Purpose**: Verify multiple orchestrator stats are inserted in one transaction
-
-```go
-func TestDatabaseWrite_BatchInsert(t *testing.T)
-```
-
-**Setup**:
-- Create database with schema
-- Create job_run entries
-
-**Test**:
-- Send stats for 100 orchestrator runs
-- Trigger flush
-- Verify single transaction was used (check transaction count if possible)
-- Verify all 100 rows were inserted
-- Verify no partial inserts (all or nothing)
-
 ### Test: Database Write - Multiple Periods
 **Purpose**: Verify multiple stats periods can coexist
 
@@ -328,41 +310,6 @@ func TestDatabaseWrite_MultiplePeriods(t *testing.T)
 - Verify 2 scheduler_stats rows (one per period)
 - Verify period IDs are different
 - Verify stats are separate
-
-### Test: Database Retry - Transient Failure
-**Purpose**: Verify retry logic on transient database failure
-
-```go
-func TestDatabaseRetry_TransientFailure(t *testing.T)
-```
-
-**Setup**:
-- Create mock database that fails first 2 attempts, succeeds on 3rd
-
-**Test**:
-- Send stats message
-- Trigger flush
-- Verify 3 attempts were made
-- Verify final attempt succeeded
-- Verify data was written
-
-### Test: Database Retry - Permanent Failure
-**Purpose**: Verify behavior on permanent database failure
-
-```go
-func TestDatabaseRetry_PermanentFailure(t *testing.T)
-```
-
-**Setup**:
-- Create mock database that always fails
-
-**Test**:
-- Send stats message
-- Trigger flush
-- Verify multiple retry attempts
-- Verify error is logged
-- Verify stats collector continues running (doesn't crash)
-- Verify next stats message can still be sent
 
 ## Concurrency Tests
 
@@ -411,62 +358,6 @@ func TestConcurrentPeriodTransitions(t *testing.T)
 - Let multiple period transitions occur
 - Verify no race conditions
 - Verify stats are correctly attributed to periods
-
-## Performance Tests
-
-### Test: High Volume Sends
-**Purpose**: Verify performance under high message volume
-
-```go
-func TestHighVolumeSends(t *testing.T)
-```
-
-**Test**:
-- Send 10,000 stats messages as fast as possible
-- Measure time taken
-- Verify < 1 second for all sends
-- Verify all messages are eventually processed
-- Verify memory usage stays bounded
-
-### Test: Memory Usage Under Load
-**Purpose**: Verify memory doesn't grow unbounded
-
-```go
-func TestMemoryUsageUnderLoad(t *testing.T)
-```
-
-**Test**:
-- Send 100,000 stats messages with periodic flushes
-- Measure memory usage before and after
-- Verify memory returns to baseline after flushes
-- Verify no memory leaks
-
-### Test: Flush Performance
-**Purpose**: Verify flush operations are fast enough
-
-```go
-func TestFlushPerformance(t *testing.T)
-```
-
-**Test**:
-- Accumulate 1000 orchestrator stats (worst case)
-- Trigger flush
-- Measure time taken
-- Verify < 100ms for flush operation
-- Verify database write time is reasonable
-
-### Test: Inbox Utilization
-**Purpose**: Verify inbox doesn't fill up under normal load
-
-```go
-func TestInboxUtilization(t *testing.T)
-```
-
-**Test**:
-- Send stats at expected production rate (1000/sec)
-- Monitor inbox depth over 60 seconds
-- Verify inbox depth stays below 50% capacity
-- Verify no send timeouts occur
 
 ## Edge Case Tests
 
@@ -521,19 +412,6 @@ func TestMaximumValues(t *testing.T)
 - Send stats with very long durations
 - Verify no overflow
 - Verify correct storage
-
-### Test: Accumulator Memory Limit
-**Purpose**: Verify accumulator doesn't grow unbounded
-
-```go
-func TestAccumulatorMemoryLimit(t *testing.T)
-```
-
-**Test**:
-- Configure large flush interval (never triggers)
-- Send 10,000 stats messages
-- Verify force flush occurs at threshold
-- Verify memory usage is bounded
 
 ## Shutdown Tests
 

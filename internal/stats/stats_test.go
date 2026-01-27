@@ -2,7 +2,6 @@ package stats
 
 import (
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,7 +18,6 @@ import (
 
 // MockDB simulates database operations for testing
 type MockDB struct {
-	mu             sync.Mutex
 	schedulerStats []*SchedulerStatsData
 	orchestrator   []*OrchestratorStatsData
 	syncerStats    []*SyncerStatsData
@@ -49,9 +47,6 @@ func (m *MockDB) WriteSchedulerStats(periodID string, startTime, endTime time.Ti
 		return fmt.Errorf("simulated database failure")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	// Store for verification
 	m.schedulerStats = append(m.schedulerStats, &SchedulerStatsData{
 		Iterations:     data.Iterations,
@@ -76,9 +71,6 @@ func (m *MockDB) WriteOrchestratorStats(periodID string, startTime, endTime time
 		return fmt.Errorf("simulated database failure")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	for _, stat := range stats {
 		m.orchestrator = append(m.orchestrator, stat)
 	}
@@ -98,9 +90,6 @@ func (m *MockDB) WriteSyncerStats(periodID string, startTime, endTime time.Time,
 		return fmt.Errorf("simulated database failure")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.syncerStats = append(m.syncerStats, &SyncerStatsData{
 		TotalWrites:     data.TotalWrites,
 		WritesSucceeded: data.WritesSucceeded,
@@ -110,20 +99,14 @@ func (m *MockDB) WriteSyncerStats(periodID string, startTime, endTime time.Time,
 }
 
 func (m *MockDB) GetSchedulerStatsCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	return len(m.schedulerStats)
 }
 
 func (m *MockDB) GetOrchestratorStatsCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	return len(m.orchestrator)
 }
 
 func (m *MockDB) GetSyncerStatsCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	return len(m.syncerStats)
 }
 
