@@ -68,20 +68,11 @@ func TestDefaultSyncerConfig(t *testing.T) {
 	if config.JobRunChannelSize <= 0 {
 		t.Error("JobRunChannelSize must be positive")
 	}
-	if config.StatsChannelSize <= 0 {
-		t.Error("StatsChannelSize must be positive")
-	}
 	if config.JobRunFlushThreshold <= 0 {
 		t.Error("JobRunFlushThreshold must be positive")
 	}
 	if config.JobRunFlushInterval <= 0 {
 		t.Error("JobRunFlushInterval must be positive")
-	}
-	if config.StatsFlushThreshold <= 0 {
-		t.Error("StatsFlushThreshold must be positive")
-	}
-	if config.StatsFlushInterval <= 0 {
-		t.Error("StatsFlushInterval must be positive")
 	}
 
 	// Verify defaults pass validation by creating a syncer

@@ -100,55 +100,6 @@ func TestSyncer_BufferJobRunUpdate_ExceedsMaximum(t *testing.T) {
 }
 
 // =============================================================================
-// Stats Buffering Tests
-// =============================================================================
-
-// TestSyncer_BufferStats_BelowThreshold verifies that stats are buffered without flushing when below threshold.
-func TestSyncer_BufferStats_BelowThreshold(t *testing.T) {
-	logger := testutil.NewTestLogger()
-	config := DefaultConfig()
-	config.StatsFlushThreshold = 30
-	syncer, _ := NewSyncer(config, logger.Logger())
-
-	// Buffer 10 stats (below threshold)
-	for i := 0; i < 10; i++ {
-		stats := SchedulerIterationStats{
-			Timestamp: time.Now(),
-			Value:     i,
-		}
-		syncer.BufferStats(stats)
-	}
-
-	syncerStats := syncer.GetStats()
-	if syncerStats.BufferedStats != 10 {
-		t.Errorf("expected 10 buffered stats, got %d", syncerStats.BufferedStats)
-	}
-}
-
-// TestSyncer_BufferStats_ReachesThreshold verifies that stats can be buffered up to threshold.
-func TestSyncer_BufferStats_ReachesThreshold(t *testing.T) {
-	logger := testutil.NewTestLogger()
-	config := DefaultConfig()
-	config.StatsFlushThreshold = 30
-	syncer, _ := NewSyncer(config, logger.Logger())
-
-	// Buffer exactly 30 stats (threshold)
-	for i := 0; i < 30; i++ {
-		stats := SchedulerIterationStats{
-			Timestamp: time.Now(),
-			Value:     i,
-		}
-		syncer.BufferStats(stats)
-	}
-
-	// Verify buffer size
-	syncerStats := syncer.GetStats()
-	if syncerStats.BufferedStats != 30 {
-		t.Errorf("expected 30 buffered stats, got %d", syncerStats.BufferedStats)
-	}
-}
-
-// =============================================================================
 // Flushing Tests
 // =============================================================================
 
@@ -232,60 +183,6 @@ func TestSyncer_FlushJobRunUpdates_ChannelFull(t *testing.T) {
 	}
 }
 
-// TestSyncer_FlushStats_Success verifies that buffered stats are flushed to the channel and cleared.
-func TestSyncer_FlushStats_Success(t *testing.T) {
-	logger := testutil.NewTestLogger()
-	config := DefaultConfig()
-	syncer, _ := NewSyncer(config, logger.Logger())
-
-	mockDB := testutil.NewMockDB()
-	syncer.Start(mockDB)
-	defer syncer.Shutdown()
-
-	// Buffer 50 stats
-	for i := 0; i < 50; i++ {
-		stat := SchedulerIterationStats{
-			Timestamp: time.Now(),
-			Value:     i,
-		}
-		syncer.BufferStats(stat)
-	}
-
-	// Flush
-	err := syncer.FlushStats()
-	if err != nil {
-		t.Fatalf("unexpected error flushing stats: %v", err)
-	}
-
-	// Buffer should be cleared
-	stats := syncer.GetStats()
-	if stats.BufferedStats != 0 {
-		t.Errorf("expected stats buffer to be cleared, got %d", stats.BufferedStats)
-	}
-
-	// Wait for writes to complete
-	time.Sleep(100 * time.Millisecond)
-
-	// Stats should be written (as a batch)
-	writtenCount := mockDB.CountWrittenStats()
-	if writtenCount != 1 {
-		t.Errorf("expected 1 stats batch written, got %d", writtenCount)
-	}
-}
-
-// TestSyncer_FlushStats_Empty verifies that flushing an empty stats buffer succeeds without error.
-func TestSyncer_FlushStats_Empty(t *testing.T) {
-	logger := testutil.NewTestLogger()
-	config := DefaultConfig()
-	syncer, _ := NewSyncer(config, logger.Logger())
-
-	// Flush empty buffer
-	err := syncer.FlushStats()
-	if err != nil {
-		t.Errorf("unexpected error flushing empty stats: %v", err)
-	}
-}
-
 // =============================================================================
 // Manual Flushing Tests
 // =============================================================================
@@ -324,39 +221,6 @@ func TestSyncer_ManualFlush_TimeBased(t *testing.T) {
 	testutil.WaitFor(t, func() bool {
 		return mockDB.CountWrittenUpdates() == 10
 	}, 1*time.Second, "waiting for writes")
-}
-
-// TestSyncer_ManualFlush_Stats verifies that manual stats flushing works.
-func TestSyncer_ManualFlush_Stats(t *testing.T) {
-	logger := testutil.NewTestLogger()
-	config := DefaultConfig()
-	config.StatsFlushInterval = 100 * time.Millisecond
-	config.StatsFlushThreshold = 1000 // High threshold - won't trigger
-	syncer, _ := NewSyncer(config, logger.Logger())
-
-	mockDB := testutil.NewMockDB()
-	syncer.Start(mockDB)
-	defer syncer.Shutdown()
-
-	// Buffer 5 stats (below threshold)
-	for i := 0; i < 5; i++ {
-		stat := SchedulerIterationStats{
-			Timestamp: time.Now(),
-			Value:     i,
-		}
-		syncer.BufferStats(stat)
-	}
-
-	// Manual flush should work regardless of time
-	err := syncer.FlushStats()
-	if err != nil {
-		t.Fatalf("unexpected error flushing: %v", err)
-	}
-
-	// Wait for writes to complete
-	testutil.WaitFor(t, func() bool {
-		return mockDB.CountWrittenStats() > 0
-	}, 1*time.Second, "waiting for stats writes")
 }
 
 // =============================================================================
@@ -441,37 +305,6 @@ func TestSyncer_JobRunSyncer_WriteFailure(t *testing.T) {
 	}
 }
 
-// TestSyncer_StatsSyncer_WriteFailure verifies that stats database write errors are logged appropriately.
-func TestSyncer_StatsSyncer_WriteFailure(t *testing.T) {
-	logger := testutil.NewTestLogger()
-	config := DefaultConfig()
-	syncer, _ := NewSyncer(config, logger.Logger())
-
-	mockDB := testutil.NewMockDB()
-	mockDB.SetWriteError(fmt.Errorf("database error"))
-	syncer.Start(mockDB)
-	defer syncer.Shutdown()
-
-	// Send stats to channel
-	statsUpdate := StatsUpdate{
-		Stats: []interface{}{
-			SchedulerIterationStats{
-				Timestamp: time.Now(),
-				Value:     1,
-			},
-		},
-	}
-	syncer.statsChannel <- statsUpdate
-
-	// Wait for write attempt
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify error logged
-	if !logger.HasError() {
-		t.Error("expected error to be logged for failed stats write")
-	}
-}
-
 // =============================================================================
 // Shutdown Tests
 // =============================================================================
@@ -494,15 +327,6 @@ func TestSyncer_Shutdown_FlushesAll(t *testing.T) {
 		syncer.BufferJobRunUpdate(update)
 	}
 
-	// Buffer 10 stats
-	for i := 0; i < 10; i++ {
-		stat := SchedulerIterationStats{
-			Timestamp: time.Now(),
-			Value:     i,
-		}
-		syncer.BufferStats(stat)
-	}
-
 	// Shutdown should flush everything
 	err := syncer.Shutdown()
 	if err != nil {
@@ -512,11 +336,6 @@ func TestSyncer_Shutdown_FlushesAll(t *testing.T) {
 	// Verify all updates written
 	if mockDB.CountWrittenUpdates() != 100 {
 		t.Errorf("expected 100 updates written, got %d", mockDB.CountWrittenUpdates())
-	}
-
-	// Verify stats written
-	if mockDB.CountWrittenStats() != 1 {
-		t.Errorf("expected 1 stats batch written, got %d", mockDB.CountWrittenStats())
 	}
 }
 

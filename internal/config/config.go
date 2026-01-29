@@ -148,9 +148,6 @@ func (c *Config) Validate() error {
 	if c.Syncer.JobRunChannelSize <= 0 {
 		return fmt.Errorf("syncer job_run_channel_size must be positive")
 	}
-	if c.Syncer.StatsChannelSize <= 0 {
-		return fmt.Errorf("syncer stats_channel_size must be positive")
-	}
 
 	// HTTP validation
 	if c.HTTP.Enabled {
