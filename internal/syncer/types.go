@@ -17,11 +17,4 @@ type JobRunUpdate struct {
 // Stats provides current syncer statistics
 type Stats struct {
 	BufferedJobRunUpdates int
-	BufferedStats         int
-}
-
-// StatsUpdate represents a batch of stats to be written to the database
-// The Stats field contains stats specific to the component sending them
-type StatsUpdate struct {
-	Stats []interface{}
 }

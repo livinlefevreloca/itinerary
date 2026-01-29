@@ -18,11 +18,6 @@ type Syncer struct {
 	jobRunChannel      chan JobRunUpdate
 	lastJobRunFlush    time.Time
 
-	// Stats buffering
-	statsBuffer    []interface{}
-	statsChannel   chan StatsUpdate
-	lastStatsFlush time.Time
-
 	// Control
 	shutdown chan struct{}
 	wg       sync.WaitGroup // Tracks background goroutines (syncers only)
@@ -40,9 +35,6 @@ func NewSyncer(config Config, logger *slog.Logger) (*Syncer, error) {
 		jobRunUpdateBuffer: make([]JobRunUpdate, 0),
 		jobRunChannel:      make(chan JobRunUpdate, config.JobRunChannelSize),
 		lastJobRunFlush:    time.Now(),
-		statsBuffer:        make([]interface{}, 0),
-		statsChannel:       make(chan StatsUpdate, config.StatsChannelSize),
-		lastStatsFlush:     time.Now(),
 		shutdown:           make(chan struct{}),
 	}, nil
 }
@@ -83,37 +75,10 @@ func (s *Syncer) FlushJobRunUpdates() error {
 	return nil
 }
 
-// BufferStats adds stats to the buffer
-func (s *Syncer) BufferStats(stats interface{}) {
-	s.statsBuffer = append(s.statsBuffer, stats)
-}
-
-// FlushStats sends all buffered stats to the syncer channel
-// Returns error if channel is full (caller should log and handle)
-func (s *Syncer) FlushStats() error {
-	if len(s.statsBuffer) == 0 {
-		return nil
-	}
-
-	update := StatsUpdate{
-		Stats: s.statsBuffer,
-	}
-
-	select {
-	case s.statsChannel <- update:
-		s.statsBuffer = make([]interface{}, 0)
-		s.lastStatsFlush = time.Now()
-		return nil
-	default:
-		return fmt.Errorf("stats channel full, %d stats buffered", len(s.statsBuffer))
-	}
-}
-
 // GetStats returns current syncer statistics
 func (s *Syncer) GetStats() Stats {
 	return Stats{
 		BufferedJobRunUpdates: len(s.jobRunUpdateBuffer),
-		BufferedStats:         len(s.statsBuffer),
 	}
 }
 
@@ -127,17 +92,11 @@ func (s *Syncer) GetLastJobRunFlushTime() time.Time {
 	return s.lastJobRunFlush
 }
 
-// GetLastStatsFlushTime returns the timestamp of the last stats flush
-func (s *Syncer) GetLastStatsFlushTime() time.Time {
-	return s.lastStatsFlush
-}
-
 // Start launches background goroutines for syncing
 func (s *Syncer) Start(db interface{}) {
-	s.wg.Add(2) // 2 syncer goroutines
+	s.wg.Add(1) // 1 syncer goroutine
 
 	go s.runJobRunSyncer(db)
-	go s.runStatsSyncer(db)
 }
 
 // runJobRunSyncer writes job run updates to the database
@@ -162,21 +121,6 @@ func (s *Syncer) runJobRunSyncer(db interface{}) {
 	s.logger.Debug("job run syncer shut down")
 }
 
-// runStatsSyncer writes stats updates to the database
-func (s *Syncer) runStatsSyncer(db interface{}) {
-	defer s.wg.Done()
-
-	for update := range s.statsChannel {
-		err := writeStatsUpdate(db, update)
-		if err != nil {
-			// Just log, stats writes are not critical
-			s.logger.Error("failed to write stats update", "error", err)
-		}
-	}
-
-	s.logger.Debug("stats syncer shut down")
-}
-
 // Shutdown performs graceful shutdown ensuring all data is persisted
 func (s *Syncer) Shutdown() error {
 	s.logger.Info("starting syncer shutdown")
@@ -188,15 +132,10 @@ func (s *Syncer) Shutdown() error {
 	// Step 2: Final flush of any remaining buffered items
 	// This adds final items to channels before we close them
 	s.logger.Debug("performing final flush",
-		"job_run_updates", len(s.jobRunUpdateBuffer),
-		"stats", len(s.statsBuffer))
+		"job_run_updates", len(s.jobRunUpdateBuffer))
 
 	if err := s.FlushJobRunUpdates(); err != nil {
 		s.logger.Warn("failed to flush job run updates on shutdown", "error", err)
-	}
-
-	if err := s.FlushStats(); err != nil {
-		s.logger.Warn("failed to flush stats on shutdown", "error", err)
 	}
 
 	// Step 3: Close write channels to signal syncers "no more data"
@@ -204,9 +143,8 @@ func (s *Syncer) Shutdown() error {
 	// - Process all buffered items in the channel
 	// - Exit when channel is closed and drained
 	// This is Go's standard pattern for signaling completion
-	s.logger.Debug("closing write channels")
+	s.logger.Debug("closing write channel")
 	close(s.jobRunChannel)
-	close(s.statsChannel)
 
 	// Step 4: Wait for syncer goroutines to finish draining and exit
 	// This ensures syncers have drained all items from channels
@@ -234,17 +172,3 @@ func writeJobRunUpdate(db interface{}, update JobRunUpdate) error {
 	return nil
 }
 
-// writeStatsUpdate writes a stats update to the database
-func writeStatsUpdate(db interface{}, update StatsUpdate) error {
-	// Use type assertion to handle MockDB for testing
-	type statsWriter interface {
-		WriteStatsUpdate(update interface{}) error
-	}
-
-	if writer, ok := db.(statsWriter); ok {
-		return writer.WriteStatsUpdate(update)
-	}
-
-	// TODO: Actual database write for production
-	return nil
-}

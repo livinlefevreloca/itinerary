@@ -508,7 +508,8 @@ func (s *Scheduler) recordIterationStats(start time.Time, messagesProcessed int)
 		MissedHeartbeatCount:    s.missedHeartbeatCount,
 	}
 
-	s.syncer.BufferStats(stats)
+	// TODO: Send stats to StatsCollector instead of syncer
+	_ = stats
 }
 
 // flushBuffers checks time and size thresholds and flushes buffers when needed
@@ -530,19 +531,7 @@ func (s *Scheduler) flushBuffers(now time.Time) {
 		}
 	}
 
-	// Check stats flush thresholds (time OR size)
-	timeSinceStatsFlush := now.Sub(s.syncer.GetLastStatsFlushTime())
-	shouldFlushStats := timeSinceStatsFlush >= syncerConfig.StatsFlushInterval ||
-		syncerStats.BufferedStats >= syncerConfig.StatsFlushThreshold
-
-	if shouldFlushStats && syncerStats.BufferedStats > 0 {
-		if err := s.syncer.FlushStats(); err != nil {
-			s.logger.Error("failed to flush stats",
-				"error", err,
-				"buffered_count", syncerStats.BufferedStats,
-				"time_since_last_flush", timeSinceStatsFlush)
-		}
-	}
+	// Stats flushing removed - now handled by StatsCollector
 }
 
 // runIndexBuilder periodically rebuilds the scheduled run index
