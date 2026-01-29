@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/livinlefevreloca/itinerary/internal/inbox"
-	"github.com/livinlefevreloca/itinerary/internal/syncer"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -88,7 +87,7 @@ func TestNewScheduler_Success(t *testing.T) {
 	})
 
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err != nil {
@@ -107,7 +106,7 @@ func TestNewScheduler_Success(t *testing.T) {
 		t.Error("expected inbox to be initialized")
 	}
 
-	if scheduler.syncer == nil {
+	if scheduler.jobStateSyncer == nil {
 		t.Error("expected syncer to be initialized")
 	}
 
@@ -123,7 +122,7 @@ func TestNewScheduler_DBQueryFails(t *testing.T) {
 	mockDB.SetQueryError(fmt.Errorf("database connection failed"))
 
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	_, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err == nil {
@@ -147,7 +146,7 @@ func TestNewScheduler_InvalidCronSchedule(t *testing.T) {
 	})
 
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err != nil {
@@ -181,7 +180,7 @@ func TestNewScheduler_InvalidCronSchedule(t *testing.T) {
 func TestScheduler_HandleOrchestratorStateChange(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -213,7 +212,7 @@ func TestScheduler_HandleOrchestratorStateChange(t *testing.T) {
 	}
 
 	// Verify update buffered
-	stats := scheduler.syncer.GetStats()
+	stats := scheduler.jobStateSyncer.GetStats()
 	if stats.BufferedJobRunUpdates != 1 {
 		t.Errorf("expected 1 buffered update, got %d", stats.BufferedJobRunUpdates)
 	}
@@ -223,7 +222,7 @@ func TestScheduler_HandleOrchestratorStateChange(t *testing.T) {
 func TestScheduler_HandleOrchestratorComplete(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -261,7 +260,7 @@ func TestScheduler_HandleOrchestratorComplete(t *testing.T) {
 	}
 
 	// Verify update buffered
-	updates := scheduler.syncer.GetStats().BufferedJobRunUpdates
+	updates := scheduler.jobStateSyncer.GetStats().BufferedJobRunUpdates
 	if updates != 1 {
 		t.Errorf("expected 1 buffered update, got %d", updates)
 	}
@@ -271,7 +270,7 @@ func TestScheduler_HandleOrchestratorComplete(t *testing.T) {
 func TestScheduler_HandleCancelRun(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -314,7 +313,7 @@ func TestScheduler_HandleCancelRun(t *testing.T) {
 func TestScheduler_HandleCancelRun_NonExistent(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -344,7 +343,7 @@ func TestScheduler_CheckHeartbeats_OneMissed(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
 	config.OrchestratorHeartbeatInterval = 10 * time.Second
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -385,7 +384,7 @@ func TestScheduler_CheckHeartbeats_Orphaned(t *testing.T) {
 	config := DefaultSchedulerConfig()
 	config.OrchestratorHeartbeatInterval = 10 * time.Second
 	config.MaxMissedOrchestratorHeartbeats = 3
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -419,7 +418,7 @@ func TestScheduler_CheckHeartbeats_Orphaned(t *testing.T) {
 	}
 
 	// Update should be buffered
-	updates := scheduler.syncer.GetStats().BufferedJobRunUpdates
+	updates := scheduler.jobStateSyncer.GetStats().BufferedJobRunUpdates
 	if updates != 1 {
 		t.Errorf("expected 1 buffered update for orphaned status, got %d", updates)
 	}
@@ -429,7 +428,7 @@ func TestScheduler_CheckHeartbeats_Orphaned(t *testing.T) {
 func TestScheduler_CheckHeartbeats_SkipsCompleted(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -458,7 +457,7 @@ func TestScheduler_CheckHeartbeats_SkipsCompleted(t *testing.T) {
 func TestScheduler_CheckHeartbeats_SkipsAllTerminalStates(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -498,7 +497,7 @@ func TestScheduler_CheckHeartbeats_SkipsAllTerminalStates(t *testing.T) {
 func TestScheduler_HandleHeartbeat_ResetsCounter(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -544,7 +543,7 @@ func TestScheduler_CleanupOrchestrators_NoCleanup(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
 	config.GracePeriod = 30 * time.Second
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -573,7 +572,7 @@ func TestScheduler_CleanupOrchestrators_AfterGrace(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
 	config.GracePeriod = 30 * time.Second
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -602,7 +601,7 @@ func TestScheduler_CleanupOrchestrators_MultipleStates(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
 	config.GracePeriod = 30 * time.Second
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -640,7 +639,7 @@ func TestScheduler_CleanupOrchestrators_SkipsActive(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
 	config.GracePeriod = 30 * time.Second
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -682,17 +681,18 @@ func TestScheduler_CleanupOrchestrators_SkipsActive(t *testing.T) {
 
 // Helper functions
 
-func createTestScheduler(t *testing.T, config SchedulerConfig, syncerConfig syncer.Config, logger *testutil.TestLogger) *Scheduler {
+func createTestScheduler(t *testing.T, config SchedulerConfig, syncerConfig JobStateSyncerConfig, logger *testutil.TestLogger) *Scheduler {
 	inboxInstance := inbox.New[InboxMessage](config.InboxBufferSize, config.InboxSendTimeout, logger.Logger())
-	syncerInstance, _ := syncer.NewSyncer(syncerConfig, logger.Logger())
+	jobStateSyncerInstance, _ := NewJobStateSyncer(syncerConfig, logger.Logger())
 
 	return &Scheduler{
 		config:              config,
-		logger:  logger.Logger(),
+		syncerConfig:        syncerConfig,
+		logger:              logger.Logger(),
 		index:               nil, // Not needed for most tests
 		activeOrchestrators: make(map[string]*OrchestratorState),
 		inbox:               inboxInstance,
-		syncer:              syncerInstance,
+		jobStateSyncer:      jobStateSyncerInstance,
 		shutdown:            make(chan struct{}),
 		rebuildIndexChan:    make(chan struct{}, 1),
 	}

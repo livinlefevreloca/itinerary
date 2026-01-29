@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/livinlefevreloca/itinerary/internal/syncer"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -57,27 +56,27 @@ func TestDefaultSchedulerConfig(t *testing.T) {
 	}
 }
 
-// TestDefaultSyncerConfig verifies that default syncer configuration has positive values and passes validation.
-func TestDefaultSyncerConfig(t *testing.T) {
-	config := DefaultSyncerConfig()
+// TestDefaultJobStateSyncerConfig verifies that default syncer configuration has positive values and passes validation.
+func TestDefaultJobStateSyncerConfig(t *testing.T) {
+	config := DefaultJobStateSyncerConfig()
 
 	// Verify defaults are non-zero and positive where required
-	if config.MaxBufferedJobRunUpdates <= 0 {
-		t.Error("MaxBufferedJobRunUpdates must be positive")
+	if config.MaxBufferedUpdates <= 0 {
+		t.Error("MaxBufferedUpdates must be positive")
 	}
-	if config.JobRunChannelSize <= 0 {
-		t.Error("JobRunChannelSize must be positive")
+	if config.ChannelSize <= 0 {
+		t.Error("ChannelSize must be positive")
 	}
-	if config.JobRunFlushThreshold <= 0 {
-		t.Error("JobRunFlushThreshold must be positive")
+	if config.FlushThreshold <= 0 {
+		t.Error("FlushThreshold must be positive")
 	}
-	if config.JobRunFlushInterval <= 0 {
-		t.Error("JobRunFlushInterval must be positive")
+	if config.FlushInterval <= 0 {
+		t.Error("FlushInterval must be positive")
 	}
 
 	// Verify defaults pass validation by creating a syncer
 	logger := testutil.NewTestLogger()
-	_, err := syncer.NewSyncer(config, logger.Logger())
+	_, err := NewJobStateSyncer(config, logger.Logger())
 	if err != nil {
 		t.Errorf("default syncer config should pass validation, got error: %v", err)
 	}
@@ -165,14 +164,14 @@ func TestValidateConfig_ZeroMaxMissedOrchestratorHeartbeats(t *testing.T) {
 	}
 }
 
-// TestValidateSyncerConfig_ZeroMaxBufferedJobRunUpdates verifies that validation fails for zero MaxBufferedJobRunUpdates.
-func TestValidateSyncerConfig_ZeroMaxBufferedJobRunUpdates(t *testing.T) {
-	config := DefaultSyncerConfig()
-	config.MaxBufferedJobRunUpdates = 0
+// TestValidateSyncerConfig_ZeroMaxBufferedUpdates verifies that validation fails for zero MaxBufferedUpdates.
+func TestValidateSyncerConfig_ZeroMaxBufferedUpdates(t *testing.T) {
+	config := DefaultJobStateSyncerConfig()
+	config.MaxBufferedUpdates = 0
 
 	logger := testutil.NewTestLogger()
-	_, err := syncer.NewSyncer(config, logger.Logger())
+	_, err := NewJobStateSyncer(config, logger.Logger())
 	if err == nil {
-		t.Error("expected error for zero MaxBufferedJobRunUpdates")
+		t.Error("expected error for zero MaxBufferedUpdates")
 	}
 }

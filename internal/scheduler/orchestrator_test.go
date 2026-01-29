@@ -15,7 +15,7 @@ import (
 func TestOrchestrator_WaitsForScheduledTime(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -66,7 +66,7 @@ func TestOrchestrator_WaitsForScheduledTime(t *testing.T) {
 func TestOrchestrator_ConfigUpdate_InPreRun(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -113,7 +113,7 @@ func TestOrchestrator_ConfigUpdate_InPreRun(t *testing.T) {
 func TestOrchestrator_Cancel_InPreRun(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -162,7 +162,7 @@ func TestOrchestrator_Cancel_InPreRun(t *testing.T) {
 func TestOrchestrator_ScheduledTimeInPast(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -213,7 +213,7 @@ func TestOrchestrator_SendsHeartbeats(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
 	config.OrchestratorHeartbeatInterval = 100 * time.Millisecond
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 
@@ -271,7 +271,7 @@ func TestOrchestrator_StopsHeartbeatsOnCompletion(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
 	config.OrchestratorHeartbeatInterval = 50 * time.Millisecond
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createTestScheduler(t, config, syncerConfig, logger)
 

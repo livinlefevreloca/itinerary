@@ -5,9 +5,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/livinlefevreloca/itinerary/internal/syncer"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
+
+// mockDBAdapter adapts testutil.MockDB to implement DatabaseWriter
+type mockDBAdapter struct {
+	*testutil.MockDB
+}
+
+func (m *mockDBAdapter) WriteJobRunUpdate(update JobRunUpdate) error {
+	return m.MockDB.WriteJobRunUpdate(update)
+}
+
+func wrapMockDB(mockDB *testutil.MockDB) DatabaseWriter {
+	return &mockDBAdapter{MockDB: mockDB}
+}
 
 // =============================================================================
 // Integration Tests
@@ -33,8 +45,8 @@ func TestIntegration_ScheduleAndExecuteJob(t *testing.T) {
 	config.GracePeriod = 10 * time.Second
 	config.LoopInterval = 500 * time.Millisecond
 
-	syncerConfig := DefaultSyncerConfig()
-	syncerConfig.JobRunFlushThreshold = 1 // Flush immediately for testing
+	syncerConfig := DefaultJobStateSyncerConfig()
+	syncerConfig.FlushThreshold = 1 // Flush immediately for testing
 
 	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err != nil {
@@ -42,7 +54,7 @@ func TestIntegration_ScheduleAndExecuteJob(t *testing.T) {
 	}
 
 	// Start scheduler
-	go scheduler.Start(mockDB)
+	go scheduler.Start(wrapMockDB(mockDB))
 	defer scheduler.Shutdown()
 
 	// Wait for job to be scheduled and executed
@@ -60,7 +72,7 @@ func TestIntegration_ScheduleAndExecuteJob(t *testing.T) {
 	// Verify update contains expected job
 	foundJob1 := false
 	for _, update := range updates {
-		if jobUpdate, ok := update.(syncer.JobRunUpdate); ok {
+		if jobUpdate, ok := update.(JobRunUpdate); ok {
 			if jobUpdate.JobID == "job1" {
 				foundJob1 = true
 				break
@@ -94,15 +106,15 @@ func TestIntegration_MultipleJobsOverlapping(t *testing.T) {
 	config.LookaheadWindow = 5 * time.Minute
 	config.LoopInterval = 500 * time.Millisecond
 
-	syncerConfig := DefaultSyncerConfig()
-	syncerConfig.JobRunFlushThreshold = 1 // Flush immediately for testing
+	syncerConfig := DefaultJobStateSyncerConfig()
+	syncerConfig.FlushThreshold = 1 // Flush immediately for testing
 
 	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err != nil {
 		t.Fatalf("failed to create scheduler: %v", err)
 	}
 
-	go scheduler.Start(mockDB)
+	go scheduler.Start(wrapMockDB(mockDB))
 	defer scheduler.Shutdown()
 
 	// Wait for all jobs to be scheduled and executed
@@ -115,7 +127,7 @@ func TestIntegration_MultipleJobsOverlapping(t *testing.T) {
 	jobsSeen := make(map[string]bool)
 
 	for _, update := range updates {
-		if jobUpdate, ok := update.(syncer.JobRunUpdate); ok {
+		if jobUpdate, ok := update.(JobRunUpdate); ok {
 			jobsSeen[jobUpdate.JobID] = true
 		}
 	}
@@ -139,7 +151,7 @@ func TestIntegration_HeartbeatOrphaning(t *testing.T) {
 	config.MaxMissedOrchestratorHeartbeats = 2
 	config.LoopInterval = 100 * time.Millisecond
 
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err != nil {
@@ -147,8 +159,8 @@ func TestIntegration_HeartbeatOrphaning(t *testing.T) {
 	}
 
 	// Start syncer to enable background writes
-	scheduler.syncer.Start(mockDB)
-	defer scheduler.syncer.Shutdown()
+	scheduler.jobStateSyncer.Start(wrapMockDB(mockDB))
+	defer scheduler.jobStateSyncer.Shutdown()
 
 	// Manually create an orchestrator that won't send heartbeats
 	runID := "job1:1704067200"
@@ -174,14 +186,14 @@ func TestIntegration_HeartbeatOrphaning(t *testing.T) {
 	}
 
 	// Flush updates and wait for writes
-	scheduler.syncer.FlushJobRunUpdates()
+	scheduler.jobStateSyncer.FlushJobRunUpdates()
 	time.Sleep(100 * time.Millisecond)
 
 	// Orphaned update should be recorded
 	foundOrphaned := false
 	updates := mockDB.GetWrittenUpdates()
 	for _, update := range updates {
-		if jobUpdate, ok := update.(syncer.JobRunUpdate); ok {
+		if jobUpdate, ok := update.(JobRunUpdate); ok {
 			if jobUpdate.Status == "orphaned" {
 				foundOrphaned = true
 				break
@@ -204,7 +216,7 @@ func TestIntegration_ShutdownWithActiveJobs(t *testing.T) {
 	mockDB := testutil.NewMockDB()
 
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err != nil {
@@ -212,7 +224,7 @@ func TestIntegration_ShutdownWithActiveJobs(t *testing.T) {
 	}
 
 	// Start syncer to enable background writes
-	scheduler.syncer.Start(mockDB)
+	scheduler.jobStateSyncer.Start(wrapMockDB(mockDB))
 
 	// Create 10 orchestrators
 	for i := 0; i < 10; i++ {
@@ -229,11 +241,11 @@ func TestIntegration_ShutdownWithActiveJobs(t *testing.T) {
 
 	// Buffer some updates
 	for i := 0; i < 50; i++ {
-		update := syncer.JobRunUpdate{
+		update := JobRunUpdate{
 			UpdateID: fmt.Sprintf("update-%d", i),
 			RunID:    fmt.Sprintf("run-%d", i),
 		}
-		scheduler.syncer.BufferJobRunUpdate(update)
+		scheduler.jobStateSyncer.BufferJobRunUpdate(update)
 	}
 
 	// Shutdown
@@ -268,15 +280,15 @@ func TestIntegration_ConcurrentWrites(t *testing.T) {
 	mockDB := testutil.NewMockDB()
 
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler, err := NewScheduler(config, syncerConfig, mockDB, logger.Logger())
 	if err != nil {
 		t.Fatalf("failed to create scheduler: %v", err)
 	}
 
-	scheduler.syncer.Start(mockDB)
-	defer scheduler.syncer.Shutdown()
+	scheduler.jobStateSyncer.Start(wrapMockDB(mockDB))
+	defer scheduler.jobStateSyncer.Shutdown()
 
 	// Pre-create orchestrators in the scheduler (main thread only)
 	runIDs := make([]string, 0, 100)
@@ -328,7 +340,7 @@ func TestIntegration_ConcurrentWrites(t *testing.T) {
 	scheduler.processInbox()
 
 	// Flush all updates
-	scheduler.syncer.FlushJobRunUpdates()
+	scheduler.jobStateSyncer.FlushJobRunUpdates()
 
 	// Wait for writes
 	testutil.WaitFor(t, func() bool {

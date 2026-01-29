@@ -7,7 +7,7 @@ import (
 
 	"github.com/livinlefevreloca/itinerary/internal/inbox"
 	"github.com/livinlefevreloca/itinerary/internal/scheduler/index"
-	"github.com/livinlefevreloca/itinerary/internal/syncer"
+
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -59,17 +59,17 @@ func BenchmarkSyncer_BufferAndFlush_10000(b *testing.B) {
 
 func benchmarkSyncerBufferAndFlush(b *testing.B, count int) {
 	logger := testutil.NewTestLogger()
-	config := DefaultSyncerConfig()
-	config.JobRunChannelSize = count * 2
-	syncerInstance, _ := syncer.NewSyncer(config, logger.Logger())
+	config := DefaultJobStateSyncerConfig()
+	config.ChannelSize = count * 2
+	jobStateSyncerInstance, _ := NewJobStateSyncer(config, logger.Logger())
 
 	mockDB := testutil.NewMockDB()
-	syncerInstance.Start(mockDB)
-	defer syncerInstance.Shutdown()
+	jobStateSyncerInstance.Start(wrapMockDB(mockDB))
+	defer jobStateSyncerInstance.Shutdown()
 
-	updates := make([]syncer.JobRunUpdate, count)
+	updates := make([]JobRunUpdate, count)
 	for i := 0; i < count; i++ {
-		updates[i] = syncer.JobRunUpdate{
+		updates[i] = JobRunUpdate{
 			UpdateID: fmt.Sprintf("update-%d", i),
 			RunID:    fmt.Sprintf("run-%d", i),
 		}
@@ -79,11 +79,11 @@ func benchmarkSyncerBufferAndFlush(b *testing.B, count int) {
 	for i := 0; i < b.N; i++ {
 		// Buffer
 		for j := 0; j < count; j++ {
-			syncerInstance.BufferJobRunUpdate(updates[j])
+			jobStateSyncerInstance.BufferJobRunUpdate(updates[j])
 		}
 
 		// Flush
-		syncerInstance.FlushJobRunUpdates()
+		jobStateSyncerInstance.FlushJobRunUpdates()
 
 		// Wait for writes
 		for mockDB.CountWrittenUpdates() < count {
@@ -113,7 +113,7 @@ func benchmarkProcessInbox(b *testing.B, messageCount int) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
 	config.InboxBufferSize = messageCount * 2
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
@@ -171,8 +171,8 @@ func BenchmarkScheduler_ScheduleOrchestrators_1000(b *testing.B) {
 func benchmarkScheduleOrchestrators(b *testing.B, count int) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
-	syncerConfig.MaxBufferedJobRunUpdates = count * 10
+	syncerConfig := DefaultJobStateSyncerConfig()
+	syncerConfig.MaxBufferedUpdates = count * 10
 
 	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
@@ -225,7 +225,7 @@ func BenchmarkScheduler_SingleIteration_1000Orchestrators(b *testing.B) {
 func benchmarkSingleIteration(b *testing.B, orchestratorCount int) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
@@ -256,7 +256,7 @@ func benchmarkSingleIteration(b *testing.B, orchestratorCount int) {
 func BenchmarkScheduler_CheckHeartbeats_1000(b *testing.B) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
@@ -285,7 +285,7 @@ func BenchmarkScheduler_CleanupOrchestrators_1000(b *testing.B) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
 	config.GracePeriod = 30 * time.Second
-	syncerConfig := DefaultSyncerConfig()
+	syncerConfig := DefaultJobStateSyncerConfig()
 
 	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
@@ -345,9 +345,9 @@ type BenchmarkT interface {
 	Fatalf(format string, args ...interface{})
 }
 
-func createBenchScheduler(t BenchmarkT, config SchedulerConfig, syncerConfig syncer.Config, logger *testutil.TestLogger) *Scheduler {
+func createBenchScheduler(t BenchmarkT, config SchedulerConfig, syncerConfig JobStateSyncerConfig, logger *testutil.TestLogger) *Scheduler {
 	inboxInstance := inbox.New[InboxMessage](config.InboxBufferSize, config.InboxSendTimeout, logger.Logger())
-	syncerInstance, _ := syncer.NewSyncer(syncerConfig, logger.Logger())
+	jobStateSyncerInstance, _ := NewJobStateSyncer(syncerConfig, logger.Logger())
 
 	return &Scheduler{
 		config:              config,
@@ -355,7 +355,7 @@ func createBenchScheduler(t BenchmarkT, config SchedulerConfig, syncerConfig syn
 		index:               nil,
 		activeOrchestrators: make(map[string]*OrchestratorState),
 		inbox:               inboxInstance,
-		syncer:              syncerInstance,
+		jobStateSyncer:              jobStateSyncerInstance,
 		shutdown:            make(chan struct{}),
 		rebuildIndexChan:    make(chan struct{}, 1),
 	}

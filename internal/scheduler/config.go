@@ -3,8 +3,6 @@ package scheduler
 import (
 	"fmt"
 	"time"
-
-	"github.com/livinlefevreloca/itinerary/internal/syncer"
 )
 
 // SchedulerConfig defines configuration for the scheduler's main loop and orchestrator management
@@ -35,6 +33,19 @@ type SchedulerConfig struct {
 	MaxMissedOrchestratorHeartbeats int           `toml:"max_missed_orchestrator_heartbeats"`
 }
 
+// JobStateSyncerConfig defines configuration for the job state syncer's database write buffering
+type JobStateSyncerConfig struct {
+	// Maximum buffered job run updates before stopping
+	MaxBufferedUpdates int `toml:"max_buffered_updates"`
+
+	// Channel buffer size
+	ChannelSize int `toml:"channel_size"`
+
+	// Job run flushing - dual mechanism (size OR time triggers flush)
+	FlushThreshold int           `toml:"flush_threshold"`
+	FlushInterval  time.Duration `toml:"flush_interval"`
+}
+
 // DefaultSchedulerConfig returns OLTP-friendly scheduler configuration defaults
 func DefaultSchedulerConfig() SchedulerConfig {
 	return SchedulerConfig{
@@ -50,9 +61,14 @@ func DefaultSchedulerConfig() SchedulerConfig {
 	}
 }
 
-// DefaultSyncerConfig returns OLTP-friendly syncer configuration defaults
-func DefaultSyncerConfig() syncer.Config {
-	return syncer.DefaultConfig()
+// DefaultJobStateSyncerConfig returns OLTP-friendly job state syncer configuration defaults
+func DefaultJobStateSyncerConfig() JobStateSyncerConfig {
+	return JobStateSyncerConfig{
+		MaxBufferedUpdates: 10000,
+		ChannelSize:        200, // OLTP-friendly: smaller batches, more frequent flushes
+		FlushThreshold:     100, // OLTP-friendly: half of channel size, reduces lock contention
+		FlushInterval:      1 * time.Second,
+	}
 }
 
 // validateConfig validates scheduler configuration and returns error if invalid
@@ -96,6 +112,27 @@ func validateConfig(config SchedulerConfig) error {
 
 	if config.MaxMissedOrchestratorHeartbeats <= 0 {
 		return fmt.Errorf("MaxMissedOrchestratorHeartbeats must be positive, got %d", config.MaxMissedOrchestratorHeartbeats)
+	}
+
+	return nil
+}
+
+// validateJobStateSyncerConfig validates job state syncer configuration and returns error if invalid
+func validateJobStateSyncerConfig(config JobStateSyncerConfig) error {
+	if config.MaxBufferedUpdates <= 0 {
+		return fmt.Errorf("MaxBufferedUpdates must be positive, got %d", config.MaxBufferedUpdates)
+	}
+
+	if config.ChannelSize <= 0 {
+		return fmt.Errorf("ChannelSize must be positive, got %d", config.ChannelSize)
+	}
+
+	if config.FlushThreshold <= 0 {
+		return fmt.Errorf("FlushThreshold must be positive, got %d", config.FlushThreshold)
+	}
+
+	if config.FlushInterval <= 0 {
+		return fmt.Errorf("FlushInterval must be positive, got %v", config.FlushInterval)
 	}
 
 	return nil
