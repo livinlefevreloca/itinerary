@@ -244,6 +244,7 @@ func (s *Scheduler) handleOrchestratorHeartbeat(msg InboxMessage) {
 
 	state, exists := s.activeOrchestrators[data.RunID]
 	if !exists {
+		slog.Warn("Recieved heartbeat for unknown run", "run_id", data.RunID)
 		return
 	}
 

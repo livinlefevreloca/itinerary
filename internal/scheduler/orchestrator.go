@@ -107,7 +107,7 @@ func generateUpdateID() string {
 }
 
 // runOrchestrator is the main orchestrator goroutine stub implementation
-func (s *Scheduler) runOrchestrator(jobID string, scheduledAt time.Time, runID string,
+func (s *Scheduler) runOrchestrator(jobId string, scheduledAt time.Time, runID string,
 	cancelChan chan struct{}, configUpdate chan *Job) {
 
 	// Helper to send heartbeat
