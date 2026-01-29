@@ -2,6 +2,7 @@ package stats
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"

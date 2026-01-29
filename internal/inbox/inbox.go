@@ -95,6 +95,11 @@ func (ib *Inbox[T]) Len() int {
 	return len(ib.ch)
 }
 
+// Chan returns the underlying channel for use in select statements
+func (ib *Inbox[T]) Chan() <-chan T {
+	return ib.ch
+}
+
 // Close closes the inbox channel
 func (ib *Inbox[T]) Close() {
 	close(ib.ch)
