@@ -8,17 +8,16 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/scheduler"
-	"github.com/livinlefevreloca/itinerary/internal/syncer"
 )
 
 // Config represents the application configuration
 type Config struct {
-	Database  db.Config                 `toml:"database"`
-	Scheduler scheduler.SchedulerConfig `toml:"scheduler"`
-	Syncer    syncer.Config             `toml:"syncer"`
-	HTTP      HTTPConfig                `toml:"http"`
-	Metrics   MetricsConfig             `toml:"metrics"`
-	Logging   LoggingConfig             `toml:"logging"`
+	Database       db.Config                        `toml:"database"`
+	Scheduler      scheduler.SchedulerConfig        `toml:"scheduler"`
+	JobStateSyncer scheduler.JobStateSyncerConfig   `toml:"job_state_syncer"`
+	HTTP           HTTPConfig                       `toml:"http"`
+	Metrics        MetricsConfig                    `toml:"metrics"`
+	Logging        LoggingConfig                    `toml:"logging"`
 }
 
 // HTTPConfig holds HTTP API server settings
@@ -54,8 +53,8 @@ func DefaultConfig() *Config {
 			MigrationsDir:   "migrations",
 			SkipMigrations:  false,
 		},
-		Scheduler: scheduler.DefaultSchedulerConfig(),
-		Syncer:    syncer.DefaultConfig(),
+		Scheduler:      scheduler.DefaultSchedulerConfig(),
+		JobStateSyncer: scheduler.DefaultJobStateSyncerConfig(),
 		HTTP: HTTPConfig{
 			Enabled: true,
 			Address: "0.0.0.0",
@@ -144,9 +143,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("scheduler inbox_buffer_size must be positive")
 	}
 
-	// Syncer validation
-	if c.Syncer.JobRunChannelSize <= 0 {
-		return fmt.Errorf("syncer job_run_channel_size must be positive")
+	// JobStateSyncer validation
+	if c.JobStateSyncer.ChannelSize <= 0 {
+		return fmt.Errorf("job_state_syncer channel_size must be positive")
 	}
 
 	// HTTP validation
