@@ -17,8 +17,7 @@ type Orchestrator struct {
 	scheduledAt time.Time
 
 	// State management
-	state         OrchestratorStatus
-	previousState OrchestratorStatus
+	state State
 
 	// Communication channels
 	cancelChan   chan struct{}
@@ -33,11 +32,8 @@ type Orchestrator struct {
 	retryAttempt int
 	maxRetries   int
 
-	// Phase timing boundaries
-	createdAt              time.Time
-	constraintCheckStarted time.Time
-	executionStartedAt     time.Time
-	completedAt            time.Time
+	// Phase timing
+	timing PhaseTiming
 
 	// Kubernetes tracking
 	podName string
@@ -46,89 +42,12 @@ type Orchestrator struct {
 	// Execution results
 	exitCode int
 	err      error
+
+	// Optional state recorder for testing
+	recorder *StateRecorder
 }
 
-// allowedTransitions defines valid state transitions
-var allowedTransitions = map[OrchestratorStatus][]OrchestratorStatus{
-	// PreRun can go to Pending or be Cancelled
-	OrchestratorPreRun: {
-		OrchestratorPending,
-		OrchestratorCancelled,
-	},
-
-	// Pending starts constraint checking or goes to container creation
-	OrchestratorPending: {
-		OrchestratorConditionPending,
-		OrchestratorContainerCreating,
-		OrchestratorCancelled,
-	},
-
-	// ConditionPending transitions to running the check
-	OrchestratorConditionPending: {
-		OrchestratorConditionRunning,
-		OrchestratorCancelled,
-	},
-
-	// ConditionRunning can proceed, need action, or be cancelled
-	OrchestratorConditionRunning: {
-		OrchestratorActionPending,
-		OrchestratorContainerCreating,
-		OrchestratorFailed,
-		OrchestratorCancelled,
-	},
-
-	// ActionPending transitions to running the action
-	OrchestratorActionPending: {
-		OrchestratorActionRunning,
-		OrchestratorCancelled,
-	},
-
-	// ActionRunning can complete or fail
-	OrchestratorActionRunning: {
-		OrchestratorContainerCreating,
-		OrchestratorCompleted,
-		OrchestratorFailed,
-		OrchestratorCancelled,
-	},
-
-	// ContainerCreating transitions to running or fails
-	OrchestratorContainerCreating: {
-		OrchestratorRunning,
-		OrchestratorFailed,
-		OrchestratorRetrying,
-		OrchestratorCancelled,
-	},
-
-	// Running transitions to terminating
-	OrchestratorRunning: {
-		OrchestratorTerminating,
-		OrchestratorCancelled,
-	},
-
-	// Terminating decides final outcome
-	OrchestratorTerminating: {
-		OrchestratorCompleted,
-		OrchestratorFailed,
-		OrchestratorRetrying,
-		OrchestratorCancelled,
-	},
-
-	// Retrying goes back to constraint check or directly to pending
-	OrchestratorRetrying: {
-		OrchestratorConditionPending,
-		OrchestratorPending,
-		OrchestratorFailed,
-		OrchestratorCancelled,
-	},
-
-	// Terminal states - no transitions allowed (except Failed can retry)
-	OrchestratorCompleted: {},
-	OrchestratorFailed: {
-		OrchestratorRetrying, // Can transition to retrying if retries remain
-	},
-	OrchestratorCancelled: {},
-	OrchestratorOrphaned:  {},
-}
+// No more allowedTransitions map - enforced by type system!
 
 // NewOrchestrator creates a new orchestrator instance
 func NewOrchestrator(
@@ -149,15 +68,16 @@ func NewOrchestrator(
 		jobID:             jobConfig.ID,
 		jobConfig:         jobConfig,
 		scheduledAt:       scheduledAt,
-		state:             OrchestratorPreRun,
-		previousState:     OrchestratorPreRun,
+		state:             &PreRunState{},
 		cancelChan:        make(chan struct{}),
 		configUpdate:      make(chan *Job, 1),
 		constraintChecker: constraintChecker,
 		k8sClient:         k8sClient,
 		logger:            logger,
 		maxRetries:        maxRetries,
-		createdAt:         time.Now(),
+		timing: PhaseTiming{
+			CreatedAt: time.Now(),
+		},
 	}
 }
 
@@ -181,43 +101,30 @@ func (o *Orchestrator) UpdateConfig(newConfig *Job) {
 }
 
 // GetState returns the current state (for testing)
-func (o *Orchestrator) GetState() OrchestratorStatus {
+func (o *Orchestrator) GetState() State {
 	return o.state
 }
 
-// GetPreviousState returns the previous state (for testing)
-func (o *Orchestrator) GetPreviousState() OrchestratorStatus {
-	return o.previousState
+// GetStateName returns the current state name (for testing)
+func (o *Orchestrator) GetStateName() string {
+	return o.state.stateName()
 }
 
-// transitionTo attempts to transition to a new state
-func (o *Orchestrator) transitionTo(newState OrchestratorStatus) error {
-	// Check if transition is allowed
-	allowed := allowedTransitions[o.state]
-	isAllowed := false
-	for _, allowedState := range allowed {
-		if newState == allowedState {
-			isAllowed = true
-			break
-		}
-	}
+// transitionTo performs a state transition and logs it
+func (o *Orchestrator) transitionTo(newState State) {
+	oldStateName := o.state.stateName()
+	o.state = newState
 
-	if !isAllowed {
-		return fmt.Errorf("invalid state transition: %s -> %s",
-			o.state.String(), newState.String())
+	// Record state for testing if recorder is present
+	if o.recorder != nil {
+		o.recorder.Record(newState)
 	}
 
 	// Log the transition
 	o.logger.Info("state transition",
-		"from", o.state.String(),
-		"to", newState.String(),
+		"from", oldStateName,
+		"to", newState.stateName(),
 		"runID", o.runID)
-
-	// Perform the transition
-	o.previousState = o.state
-	o.state = newState
-
-	return nil
 }
 
 // run is the main orchestrator loop
@@ -227,67 +134,64 @@ func (o *Orchestrator) run() {
 			o.logger.Error("orchestrator panic recovered",
 				"runID", o.runID,
 				"panic", r)
-			// Try to transition to failed state
-			_ = o.transitionTo(OrchestratorFailed)
+			// Transition to failed state
+			o.transitionTo(&FailedState{})
 			o.runFailed()
 		}
 	}()
 
 	for {
-		switch o.state {
-		case OrchestratorPreRun:
+		switch o.state.(type) {
+		case *PreRunState:
 			o.runPreRun()
-		case OrchestratorPending:
+		case *PendingState:
 			o.runPending()
-		case OrchestratorConditionPending:
+		case *ConditionPendingState:
 			o.runConditionPending()
-		case OrchestratorConditionRunning:
+		case *ConditionRunningState:
 			o.runConditionRunning()
-		case OrchestratorActionPending:
+		case *ActionPendingState:
 			o.runActionPending()
-		case OrchestratorActionRunning:
+		case *ActionRunningState:
 			o.runActionRunning()
-		case OrchestratorContainerCreating:
+		case *ContainerCreatingState:
 			o.runContainerCreating()
-		case OrchestratorRunning:
+		case *RunningState:
 			o.runRunning()
-		case OrchestratorTerminating:
+		case *TerminatingState:
 			o.runTerminating()
-		case OrchestratorRetrying:
+		case *RetryingState:
 			o.runRetrying()
-		case OrchestratorCompleted:
+		case *CompletedState:
 			o.runCompleted()
 			return
-		case OrchestratorFailed:
+		case *FailedState:
 			o.runFailed()
 			return
-		case OrchestratorCancelled:
+		case *CancelledState:
 			o.runCancelled()
 			return
-		case OrchestratorOrphaned:
+		case *OrphanedState:
 			o.runOrphaned()
 			return
 		default:
-			o.logger.Error("unknown state",
-				"state", o.state,
+			o.logger.Error("unknown state type",
+				"state", fmt.Sprintf("%T", o.state),
 				"runID", o.runID)
-			_ = o.transitionTo(OrchestratorFailed)
+			o.transitionTo(&FailedState{})
 		}
 	}
 }
 
 // runPreRun waits for the scheduled time
 func (o *Orchestrator) runPreRun() {
+	state := o.state.(*PreRunState)
+
 	// Check if scheduled time has already passed
 	now := time.Now()
 	if now.After(o.scheduledAt) || now.Equal(o.scheduledAt) {
 		// Scheduled time has passed, move to pending immediately
-		if err := o.transitionTo(OrchestratorPending); err != nil {
-			o.logger.Error("failed to transition to pending",
-				"error", err,
-				"runID", o.runID)
-			_ = o.transitionTo(OrchestratorFailed)
-		}
+		o.transitionTo(state.ToPending())
 		return
 	}
 
@@ -299,157 +203,120 @@ func (o *Orchestrator) runPreRun() {
 	select {
 	case <-timer.C:
 		// Scheduled time reached
-		if err := o.transitionTo(OrchestratorPending); err != nil {
-			o.logger.Error("failed to transition to pending",
-				"error", err,
-				"runID", o.runID)
-			_ = o.transitionTo(OrchestratorFailed)
-		}
+		o.transitionTo(state.ToPending())
 	case newConfig := <-o.configUpdate:
 		// Config updated while waiting
 		o.jobConfig = newConfig
 		// Stay in PreRun state, continue waiting
 	case <-o.cancelChan:
 		// Cancelled while waiting
-		_ = o.transitionTo(OrchestratorCancelled)
+		o.transitionTo(state.ToCancelled())
 	}
 }
 
 // runPending determines whether to check constraints or go directly to execution
 func (o *Orchestrator) runPending() {
+	state := o.state.(*PendingState)
+
 	// Check if we need to run constraint checks
 	if o.constraintChecker != nil && len(o.jobConfig.ConstraintConfig) > 0 {
 		// Transition to constraint checking phase
-		o.constraintCheckStarted = time.Now()
-		if err := o.transitionTo(OrchestratorConditionPending); err != nil {
-			o.logger.Error("failed to transition to condition pending",
-				"error", err,
-				"runID", o.runID)
-			_ = o.transitionTo(OrchestratorFailed)
-		}
+		o.timing.ConstraintCheckStarted = time.Now()
+		o.transitionTo(state.ToConditionPending())
 	} else {
 		// No constraints, go directly to container creation
-		o.executionStartedAt = time.Now()
-		if err := o.transitionTo(OrchestratorContainerCreating); err != nil {
-			o.logger.Error("failed to transition to container creating",
-				"error", err,
-				"runID", o.runID)
-			_ = o.transitionTo(OrchestratorFailed)
-		}
+		o.timing.ExecutionStartedAt = time.Now()
+		o.transitionTo(state.ToContainerCreating())
 	}
 }
 
 // runConditionPending prepares to check constraints
 func (o *Orchestrator) runConditionPending() {
+	state := o.state.(*ConditionPendingState)
+
 	// Check for cancellation
 	select {
 	case <-o.cancelChan:
-		_ = o.transitionTo(OrchestratorCancelled)
+		o.transitionTo(state.ToCancelled())
 		return
 	default:
 	}
 
 	// Transition to actually running the constraint check
-	if err := o.transitionTo(OrchestratorConditionRunning); err != nil {
-		o.logger.Error("failed to transition to condition running",
-			"error", err,
-			"runID", o.runID)
-		_ = o.transitionTo(OrchestratorFailed)
-	}
+	o.transitionTo(state.ToConditionRunning())
 }
 
 // runConditionRunning executes constraint checks
 func (o *Orchestrator) runConditionRunning() {
+	state := o.state.(*ConditionRunningState)
+
 	// TODO: Implement constraint checking
 	// For now, just transition to container creating
-	o.executionStartedAt = time.Now()
-	if err := o.transitionTo(OrchestratorContainerCreating); err != nil {
-		o.logger.Error("failed to transition to container creating",
-			"error", err,
-			"runID", o.runID)
-		_ = o.transitionTo(OrchestratorFailed)
-	}
+	o.timing.ExecutionStartedAt = time.Now()
+	o.transitionTo(state.ToContainerCreating())
 }
 
 // runActionPending prepares to execute actions
 func (o *Orchestrator) runActionPending() {
+	state := o.state.(*ActionPendingState)
+
 	// Check for cancellation
 	select {
 	case <-o.cancelChan:
-		_ = o.transitionTo(OrchestratorCancelled)
+		o.transitionTo(state.ToCancelled())
 		return
 	default:
 	}
 
 	// Transition to actually running the action
-	if err := o.transitionTo(OrchestratorActionRunning); err != nil {
-		o.logger.Error("failed to transition to action running",
-			"error", err,
-			"runID", o.runID)
-		_ = o.transitionTo(OrchestratorFailed)
-	}
+	o.transitionTo(state.ToActionRunning())
 }
 
 // runActionRunning executes actions
 func (o *Orchestrator) runActionRunning() {
+	state := o.state.(*ActionRunningState)
+
 	// TODO: Implement action execution
 	// For now, just transition to container creating
-	o.executionStartedAt = time.Now()
-	if err := o.transitionTo(OrchestratorContainerCreating); err != nil {
-		o.logger.Error("failed to transition to container creating",
-			"error", err,
-			"runID", o.runID)
-		_ = o.transitionTo(OrchestratorFailed)
-	}
+	o.timing.ExecutionStartedAt = time.Now()
+	o.transitionTo(state.ToContainerCreating())
 }
 
 // runContainerCreating creates the Kubernetes job
 func (o *Orchestrator) runContainerCreating() {
+	state := o.state.(*ContainerCreatingState)
+
 	// TODO: Implement Kubernetes job creation
 	// For now, just transition to running
-	if err := o.transitionTo(OrchestratorRunning); err != nil {
-		o.logger.Error("failed to transition to running",
-			"error", err,
-			"runID", o.runID)
-		_ = o.transitionTo(OrchestratorFailed)
-	}
+	o.transitionTo(state.ToRunning())
 }
 
 // runRunning monitors the executing job
 func (o *Orchestrator) runRunning() {
+	state := o.state.(*RunningState)
+
 	// TODO: Implement job monitoring
 	// For now, just transition to terminating
-	if err := o.transitionTo(OrchestratorTerminating); err != nil {
-		o.logger.Error("failed to transition to terminating",
-			"error", err,
-			"runID", o.runID)
-		_ = o.transitionTo(OrchestratorFailed)
-	}
+	o.transitionTo(state.ToTerminating())
 }
 
 // runTerminating handles job completion and cleanup
 func (o *Orchestrator) runTerminating() {
+	state := o.state.(*TerminatingState)
+
 	// TODO: Implement termination logic
 	// For now, just transition to completed
-	o.completedAt = time.Now()
-	if err := o.transitionTo(OrchestratorCompleted); err != nil {
-		o.logger.Error("failed to transition to completed",
-			"error", err,
-			"runID", o.runID)
-		_ = o.transitionTo(OrchestratorFailed)
-	}
+	o.timing.CompletedAt = time.Now()
+	o.transitionTo(state.ToCompleted())
 }
 
 // runRetrying handles retry logic
 func (o *Orchestrator) runRetrying() {
+	state := o.state.(*RetryingState)
+
 	// TODO: Implement retry logic
 	// For now, just transition to pending
-	if err := o.transitionTo(OrchestratorPending); err != nil {
-		o.logger.Error("failed to transition to pending",
-			"error", err,
-			"runID", o.runID)
-		_ = o.transitionTo(OrchestratorFailed)
-	}
+	o.transitionTo(state.ToPending())
 }
 
 // runCompleted handles successful completion

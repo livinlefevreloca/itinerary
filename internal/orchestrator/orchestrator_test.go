@@ -104,22 +104,22 @@ func (m *MockConstraintChecker) ShouldRecheckOnRetry(job *Job) bool {
 	return m.recheckOnRetry
 }
 
-// waitForState waits for orchestrator to reach a specific state
-func waitForState(t *testing.T, orch *Orchestrator, state OrchestratorStatus, timeout time.Duration) {
+// waitForState waits for orchestrator to reach a specific state name
+func waitForState(t *testing.T, orch *Orchestrator, stateName string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if orch.state == state {
+		if orch.GetStateName() == stateName {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("timeout waiting for state %s, current state: %s", state.String(), orch.state.String())
+	t.Fatalf("timeout waiting for state %s, current state: %s", stateName, orch.GetStateName())
 }
 
 // triggerCancellation triggers cancellation on an orchestrator
 func triggerCancellation(orch *Orchestrator) {
-	close(orch.cancelChan)
+	orch.Cancel()
 }
 
 // verifyJobCreated verifies that a job was created in the fake client
@@ -173,243 +173,28 @@ func countHeartbeats(inbox *MockInbox) int {
 }
 
 // waitForCompletion waits for orchestrator to reach a terminal state
-func waitForCompletion(t *testing.T, orch *Orchestrator, timeout time.Duration) OrchestratorStatus {
+func waitForCompletion(t *testing.T, orch *Orchestrator, timeout time.Duration) string {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		currentState := orch.state
-		if isTerminalState(currentState) {
-			return currentState
+		stateName := orch.GetStateName()
+		if isTerminalState(stateName) {
+			return stateName
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("timeout waiting for terminal state, current state: %s", orch.state.String())
-	return orch.state
+	t.Fatalf("timeout waiting for terminal state, current state: %s", orch.GetStateName())
+	return orch.GetStateName()
 }
 
 // isTerminalState checks if a state is terminal
-func isTerminalState(state OrchestratorStatus) bool {
-	return state == OrchestratorCompleted ||
-		state == OrchestratorFailed ||
-		state == OrchestratorCancelled ||
-		state == OrchestratorOrphaned
+func isTerminalState(stateName string) bool {
+	return stateName == "completed" ||
+		stateName == "failed" ||
+		stateName == "cancelled" ||
+		stateName == "orphaned"
 }
 
-// ==============================================================================
-// 1. State Machine Tests
-// ==============================================================================
-
-func TestStateTransition_ValidTransitions(t *testing.T) {
-	// Test all valid transitions from allowedTransitions map
-	testCases := []struct {
-		from OrchestratorStatus
-		to   OrchestratorStatus
-	}{
-		{OrchestratorPreRun, OrchestratorPending},
-		{OrchestratorPreRun, OrchestratorCancelled},
-		{OrchestratorPending, OrchestratorConditionPending},
-		{OrchestratorPending, OrchestratorContainerCreating},
-		{OrchestratorConditionPending, OrchestratorConditionRunning},
-		{OrchestratorConditionRunning, OrchestratorActionPending},
-		{OrchestratorConditionRunning, OrchestratorContainerCreating},
-		{OrchestratorActionPending, OrchestratorActionRunning},
-		{OrchestratorActionRunning, OrchestratorContainerCreating},
-		{OrchestratorActionRunning, OrchestratorCompleted},
-		{OrchestratorActionRunning, OrchestratorFailed},
-		{OrchestratorContainerCreating, OrchestratorRunning},
-		{OrchestratorRunning, OrchestratorTerminating},
-		{OrchestratorTerminating, OrchestratorCompleted},
-		{OrchestratorTerminating, OrchestratorFailed},
-		{OrchestratorTerminating, OrchestratorRetrying},
-		{OrchestratorFailed, OrchestratorRetrying},
-		{OrchestratorRetrying, OrchestratorPending},
-		{OrchestratorRetrying, OrchestratorConditionPending},
-		{OrchestratorRetrying, OrchestratorFailed},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.from.String()+"_to_"+tc.to.String(), func(t *testing.T) {
-			orch := &Orchestrator{
-				state:  tc.from,
-				logger: createTestLogger(),
-			}
-
-			err := orch.transitionTo(tc.to)
-			assert.NoError(t, err)
-			assert.Equal(t, tc.to, orch.state)
-			assert.Equal(t, tc.from, orch.previousState)
-		})
-	}
-}
-
-func TestStateTransition_InvalidTransitions(t *testing.T) {
-	testCases := []struct {
-		from OrchestratorStatus
-		to   OrchestratorStatus
-	}{
-		{OrchestratorPreRun, OrchestratorRunning},
-		{OrchestratorPending, OrchestratorCompleted},
-		{OrchestratorRunning, OrchestratorCompleted},
-		{OrchestratorConditionRunning, OrchestratorRetrying},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.from.String()+"_to_"+tc.to.String(), func(t *testing.T) {
-			orch := &Orchestrator{
-				state:  tc.from,
-				logger: createTestLogger(),
-			}
-
-			err := orch.transitionTo(tc.to)
-			assert.Error(t, err)
-			assert.Equal(t, tc.from, orch.state) // State should remain unchanged
-		})
-	}
-}
-
-func TestStateTransition_TerminalStates(t *testing.T) {
-	terminalStates := []OrchestratorStatus{
-		OrchestratorCompleted,
-		OrchestratorFailed,
-		OrchestratorCancelled,
-		OrchestratorOrphaned,
-	}
-
-	targetStates := []OrchestratorStatus{
-		OrchestratorPending,
-		OrchestratorRunning,
-		OrchestratorCompleted,
-	}
-
-	for _, terminal := range terminalStates {
-		for _, target := range targetStates {
-			// Exception: Failed can transition to Retrying
-			if terminal == OrchestratorFailed && target == OrchestratorRetrying {
-				continue
-			}
-
-			t.Run(terminal.String()+"_to_"+target.String(), func(t *testing.T) {
-				orch := &Orchestrator{
-					state:  terminal,
-					logger: createTestLogger(),
-				}
-
-				err := orch.transitionTo(target)
-				assert.Error(t, err)
-				assert.Equal(t, terminal, orch.state)
-			})
-		}
-	}
-}
-
-func TestStateTransition_Concurrency(t *testing.T) {
-	t.Skip("TODO: Implement concurrency test with -race flag")
-}
-
-func TestStateTransition_PreRunPhase(t *testing.T) {
-	orch := &Orchestrator{
-		state:  OrchestratorPreRun,
-		logger: createTestLogger(),
-	}
-
-	// Valid transitions from PreRun
-	err := orch.transitionTo(OrchestratorPending)
-	assert.NoError(t, err)
-
-	orch.state = OrchestratorPreRun
-	err = orch.transitionTo(OrchestratorCancelled)
-	assert.NoError(t, err)
-
-	// Invalid transition from PreRun
-	orch.state = OrchestratorPreRun
-	err = orch.transitionTo(OrchestratorRunning)
-	assert.Error(t, err)
-}
-
-func TestStateTransition_ConstraintPhase(t *testing.T) {
-	// Test Pending → ConditionPending
-	orch := &Orchestrator{
-		state:  OrchestratorPending,
-		logger: createTestLogger(),
-	}
-	err := orch.transitionTo(OrchestratorConditionPending)
-	assert.NoError(t, err)
-
-	// Test ConditionPending → ConditionRunning
-	err = orch.transitionTo(OrchestratorConditionRunning)
-	assert.NoError(t, err)
-
-	// Test ConditionRunning → ActionPending (constraint violated)
-	err = orch.transitionTo(OrchestratorActionPending)
-	assert.NoError(t, err)
-
-	// Test ConditionRunning → ContainerCreating (all passed)
-	orch.state = OrchestratorConditionRunning
-	err = orch.transitionTo(OrchestratorContainerCreating)
-	assert.NoError(t, err)
-
-	// Invalid: ConditionRunning → Completed
-	orch.state = OrchestratorConditionRunning
-	err = orch.transitionTo(OrchestratorCompleted)
-	assert.Error(t, err)
-}
-
-func TestStateTransition_ExecutionPhase(t *testing.T) {
-	// Test ContainerCreating → Running
-	orch := &Orchestrator{
-		state:  OrchestratorContainerCreating,
-		logger: createTestLogger(),
-	}
-	err := orch.transitionTo(OrchestratorRunning)
-	assert.NoError(t, err)
-
-	// Test Running → Terminating
-	err = orch.transitionTo(OrchestratorTerminating)
-	assert.NoError(t, err)
-
-	// Test Terminating → Completed
-	err = orch.transitionTo(OrchestratorCompleted)
-	assert.NoError(t, err)
-
-	// Test Terminating → Failed
-	orch.state = OrchestratorTerminating
-	err = orch.transitionTo(OrchestratorFailed)
-	assert.NoError(t, err)
-
-	// Test Terminating → Retrying
-	orch.state = OrchestratorTerminating
-	err = orch.transitionTo(OrchestratorRetrying)
-	assert.NoError(t, err)
-}
-
-func TestStateTransition_RetryPhase(t *testing.T) {
-	// Test Failed → Retrying (if retries remain)
-	orch := &Orchestrator{
-		state:  OrchestratorFailed,
-		logger: createTestLogger(),
-	}
-	err := orch.transitionTo(OrchestratorRetrying)
-	assert.NoError(t, err)
-
-	// Test Retrying → Pending (skip constraint re-check)
-	err = orch.transitionTo(OrchestratorPending)
-	assert.NoError(t, err)
-
-	// Test Retrying → ConditionPending (re-check constraints)
-	orch.state = OrchestratorRetrying
-	err = orch.transitionTo(OrchestratorConditionPending)
-	assert.NoError(t, err)
-
-	// Test Retrying → Failed (no retries left)
-	orch.state = OrchestratorRetrying
-	err = orch.transitionTo(OrchestratorFailed)
-	assert.NoError(t, err)
-
-	// Invalid: Retrying → Completed
-	orch.state = OrchestratorRetrying
-	err = orch.transitionTo(OrchestratorCompleted)
-	assert.Error(t, err)
-}
 
 // ==============================================================================
 // 2. Phase Timing Tests
