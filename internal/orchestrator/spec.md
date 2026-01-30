@@ -179,7 +179,7 @@ func (o *Orchestrator) transitionTo(newState OrchestratorStatus) error {
 - All state changes MUST go through `transitionTo()`
 - Direct assignment to state field is prohibited
 - Invalid transitions return error and are logged
-- State transitions are atomic operations
+- **Lock-free design**: Each orchestrator runs in a single goroutine, so no synchronization needed
 - Previous state is tracked for debugging
 
 ## Core Functionality
@@ -473,9 +473,6 @@ type Orchestrator struct {
     // State management
     state              OrchestratorStatus
     previousState      OrchestratorStatus
-
-    // State machine validation
-    transitionLock     sync.Mutex  // Protects state transitions
 
     // Communication channels
     cancelChan     chan struct{}

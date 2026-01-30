@@ -85,11 +85,7 @@ func waitForState(t *testing.T, orch *Orchestrator, state OrchestratorStatus, ti
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		orch.transitionLock.Lock()
-		currentState := orch.state
-		orch.transitionLock.Unlock()
-
-		if currentState == state {
+		if orch.state == state {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -157,10 +153,7 @@ func waitForCompletion(t *testing.T, orch *Orchestrator, timeout time.Duration) 
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		orch.transitionLock.Lock()
 		currentState := orch.state
-		orch.transitionLock.Unlock()
-
 		if isTerminalState(currentState) {
 			return currentState
 		}

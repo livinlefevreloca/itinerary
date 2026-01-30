@@ -29,6 +29,16 @@ When implementing features for the Itinerary project, follow this strict procedu
 * All I/O must be delegated to other goroutines
 * This is a critical invariant that must never be violated
 
+### Concurrency Design
+* **PREFER LOCK-FREE DESIGN**
+* The scheduler implementation is intended to be lock-free
+* If you think you need to add a lock (sync.Mutex, sync.RWMutex, etc.), you MUST:
+  1. Call it out to the user explicitly
+  2. Provide a detailed explanation of why the lock is necessary
+  3. Explain why a lock-free approach won't work
+* Try to make all components lock-free if possible
+* Use channels and goroutines for synchronization instead of locks where feasible
+
 ### Code Quality
 * Write idiomatic Go code
 * Use clear, descriptive variable and function names
