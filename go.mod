@@ -8,3 +8,10 @@ require (
 )
 
 require github.com/BurntSushi/toml v1.6.0
+
+require (
+	github.com/stretchr/testify v1.9.0 // indirect
+	k8s.io/api v0.31.0 // indirect
+	k8s.io/apimachinery v0.31.0 // indirect
+	k8s.io/client-go v0.31.0 // indirect
+)
