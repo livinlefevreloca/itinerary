@@ -193,25 +193,101 @@ func (o *Orchestrator) transitionTo(newState OrchestratorStatus) error {
 
 ### 1. Lifecycle Management
 
-#### runOrchestrator Function
+#### State Machine Implementation Pattern
+
+The orchestrator implements a clean state machine where each state has its own function containing all logic for that state.
+
+**Main Loop:**
 ```go
-func (s *Scheduler) runOrchestrator(
-    jobID string,
-    scheduledAt time.Time,
-    runID string,
-    cancelChan chan struct{},
-    configUpdate chan *Job,
-)
+func (o *Orchestrator) run() {
+    for {
+        switch o.state {
+        case OrchestratorPreRun:
+            o.runPreRun()
+        case OrchestratorPending:
+            o.runPending()
+        case OrchestratorConditionPending:
+            o.runConditionPending()
+        case OrchestratorConditionRunning:
+            o.runConditionRunning()
+        case OrchestratorActionPending:
+            o.runActionPending()
+        case OrchestratorActionRunning:
+            o.runActionRunning()
+        case OrchestratorContainerCreating:
+            o.runContainerCreating()
+        case OrchestratorRunning:
+            o.runRunning()
+        case OrchestratorTerminating:
+            o.runTerminating()
+        case OrchestratorRetrying:
+            o.runRetrying()
+        case OrchestratorCompleted:
+            o.runCompleted()
+            return
+        case OrchestratorFailed:
+            o.runFailed()
+            return
+        case OrchestratorCancelled:
+            o.runCancelled()
+            return
+        case OrchestratorOrphaned:
+            // Should never reach here in normal operation
+            // Orphaned is set externally by scheduler
+            return
+        }
+    }
+}
 ```
 
-**Responsibilities:**
-- Wait until scheduled time (PreRun phase)
-- Check pre-execution constraints
-- Execute pre-execution actions if needed
-- Create Kubernetes job/pod
-- Monitor execution
-- Handle retries
-- Report completion
+**State Function Pattern:**
+- Each state has a dedicated function (e.g., `runPreRun()`, `runPending()`)
+- State function contains all logic executable in that state
+- State function calls `transitionTo()` to move to next state
+- Every return path from a state function MUST correspond to a valid transition
+- No state logic in the main loop - it only dispatches to state functions
+
+**Terminal State Functions:**
+Each terminal state has its own function to handle different cleanup/reporting:
+
+```go
+func (o *Orchestrator) runCompleted() {
+    // Success path
+    o.sendCompletionMessage(true, nil)
+    o.submitMetrics()
+    // Clean up Kubernetes resources
+    // Send final heartbeat
+}
+
+func (o *Orchestrator) runFailed() {
+    // Failure path
+    o.sendCompletionMessage(false, o.lastError)
+    o.submitMetrics()
+    // Different cleanup - might preserve resources for debugging
+    // Log failure details
+}
+
+func (o *Orchestrator) runCancelled() {
+    // Cancellation path
+    o.sendCompletionMessage(false, errors.New("cancelled"))
+    o.submitMetrics()
+    // Immediate cleanup of all resources
+    // Send cancellation notification
+}
+```
+
+**Example Non-Terminal State Function:**
+```go
+func (o *Orchestrator) runPending() {
+    // Decide whether to check constraints
+    if o.jobConfig.hasConstraints() {
+        o.transitionTo(OrchestratorConditionPending)
+    } else {
+        // No constraints, go directly to execution
+        o.transitionTo(OrchestratorContainerCreating)
+    }
+}
+```
 
 **Heartbeat Behavior:**
 - Send heartbeat every `OrchestratorHeartbeatInterval` (default: 10s)
