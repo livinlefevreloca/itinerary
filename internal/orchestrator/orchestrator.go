@@ -107,12 +107,12 @@ func (o *Orchestrator) GetState() State {
 
 // GetStateName returns the current state name (for testing)
 func (o *Orchestrator) GetStateName() string {
-	return o.state.stateName()
+	return o.state.Name()
 }
 
 // transitionTo performs a state transition and logs it
 func (o *Orchestrator) transitionTo(newState State) {
-	oldStateName := o.state.stateName()
+	oldStateName := o.state.Name()
 	o.state = newState
 
 	// Record state for testing if recorder is present
@@ -123,7 +123,7 @@ func (o *Orchestrator) transitionTo(newState State) {
 	// Log the transition
 	o.logger.Info("state transition",
 		"from", oldStateName,
-		"to", newState.stateName(),
+		"to", newState.Name(),
 		"runID", o.runID)
 }
 
