@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"log/slog"
+	"os"
 	"testing"
 	"time"
 
@@ -15,6 +17,13 @@ import (
 // ==============================================================================
 // Test Helpers
 // ==============================================================================
+
+// createTestLogger creates a logger for testing
+func createTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelError, // Reduce noise in tests
+	}))
+}
 
 // createFakeK8sClient creates a fake Kubernetes client for testing
 func createFakeK8sClient() *fake.Clientset {
@@ -221,7 +230,8 @@ func TestStateTransition_ValidTransitions(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.from.String()+"_to_"+tc.to.String(), func(t *testing.T) {
 			orch := &Orchestrator{
-				state: tc.from,
+				state:  tc.from,
+				logger: createTestLogger(),
 			}
 
 			err := orch.transitionTo(tc.to)
@@ -246,7 +256,8 @@ func TestStateTransition_InvalidTransitions(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.from.String()+"_to_"+tc.to.String(), func(t *testing.T) {
 			orch := &Orchestrator{
-				state: tc.from,
+				state:  tc.from,
+				logger: createTestLogger(),
 			}
 
 			err := orch.transitionTo(tc.to)
@@ -279,7 +290,8 @@ func TestStateTransition_TerminalStates(t *testing.T) {
 
 			t.Run(terminal.String()+"_to_"+target.String(), func(t *testing.T) {
 				orch := &Orchestrator{
-					state: terminal,
+					state:  terminal,
+					logger: createTestLogger(),
 				}
 
 				err := orch.transitionTo(target)
@@ -295,7 +307,10 @@ func TestStateTransition_Concurrency(t *testing.T) {
 }
 
 func TestStateTransition_PreRunPhase(t *testing.T) {
-	orch := &Orchestrator{state: OrchestratorPreRun}
+	orch := &Orchestrator{
+		state:  OrchestratorPreRun,
+		logger: createTestLogger(),
+	}
 
 	// Valid transitions from PreRun
 	err := orch.transitionTo(OrchestratorPending)
@@ -313,7 +328,10 @@ func TestStateTransition_PreRunPhase(t *testing.T) {
 
 func TestStateTransition_ConstraintPhase(t *testing.T) {
 	// Test Pending → ConditionPending
-	orch := &Orchestrator{state: OrchestratorPending}
+	orch := &Orchestrator{
+		state:  OrchestratorPending,
+		logger: createTestLogger(),
+	}
 	err := orch.transitionTo(OrchestratorConditionPending)
 	assert.NoError(t, err)
 
@@ -338,7 +356,10 @@ func TestStateTransition_ConstraintPhase(t *testing.T) {
 
 func TestStateTransition_ExecutionPhase(t *testing.T) {
 	// Test ContainerCreating → Running
-	orch := &Orchestrator{state: OrchestratorContainerCreating}
+	orch := &Orchestrator{
+		state:  OrchestratorContainerCreating,
+		logger: createTestLogger(),
+	}
 	err := orch.transitionTo(OrchestratorRunning)
 	assert.NoError(t, err)
 
@@ -363,7 +384,10 @@ func TestStateTransition_ExecutionPhase(t *testing.T) {
 
 func TestStateTransition_RetryPhase(t *testing.T) {
 	// Test Failed → Retrying (if retries remain)
-	orch := &Orchestrator{state: OrchestratorFailed}
+	orch := &Orchestrator{
+		state:  OrchestratorFailed,
+		logger: createTestLogger(),
+	}
 	err := orch.transitionTo(OrchestratorRetrying)
 	assert.NoError(t, err)
 
