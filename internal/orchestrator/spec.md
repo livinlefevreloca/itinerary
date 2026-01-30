@@ -222,20 +222,20 @@ func (s *Scheduler) runOrchestrator(
 - Handle cancellation via `cancelChan`
 - Transition: `PreRun → Pending` when scheduled time arrives
 
-**Phase 2: Pre-Execution Constraints**
+**Phase 2: Pre-Execution Constraints and Actions**
 - State: `Pending → ConditionPending`
 - Check if job has pre-execution constraints defined
 - Transition: `ConditionPending → ConditionRunning`
-- Call constraint checker to evaluate all configured constraints
-- Constraint checker returns list of violations (if any)
-- Transition: `ConditionRunning → ActionPending` (if violations exist) or `ConditionRunning → ContainerCreating` (if all pass)
+- Call `constraintChecker.CheckPreExecution()`
+  - Constraint checker internally evaluates all constraints
+  - For each constraint, calls either onViolation or onMet action list
+  - Actions may send messages back to orchestrator or scheduler
+  - Returns `ConstraintCheckResult` with ShouldProceed boolean
+- Transition based on result:
+  - `ShouldProceed = true`: `ConditionRunning → ContainerCreating`
+  - `ShouldProceed = false`: `ConditionRunning → Failed` or `ConditionRunning → Retrying`
 
-**Phase 3: Pre-Execution Actions**
-- State: `ActionPending → ActionRunning`
-- Call action executor with constraint violations
-- Action executor determines and executes appropriate action
-- Action executor returns result (proceed, skip, delay, etc.)
-- Transition: `ActionRunning → ContainerCreating` (proceed), `ActionRunning → Completed` (skip), or `ActionRunning → Failed` (error)
+**Note:** The constraint checker may internally transition orchestrator through `ActionPending` and `ActionRunning` states by sending state change messages while actions execute. This provides visibility into long-running actions but is managed by the constraint/action module, not the orchestrator itself.
 
 **Phase 4: Execution**
 - State: `ContainerCreating`
@@ -301,88 +301,73 @@ func retrievePodLogs(runID string) (logs string, err error)
 - Store logs to database or external storage
 - Handle log truncation if too large
 
-### 3. Constraint Checking Interface
+### 3. Constraint-Action System Interface
 
-The orchestrator delegates constraint checking to a pluggable constraint checker module.
+The orchestrator delegates constraint evaluation and action execution to a pluggable constraint checker module.
 
 ```go
 type ConstraintChecker interface {
-    // CheckPreExecution evaluates all pre-execution constraints for a job run
-    CheckPreExecution(ctx context.Context, job *Job, runID string) ([]ConstraintViolation, error)
+    // CheckPreExecution evaluates all pre-execution constraints
+    // Internally handles calling onViolation/onMet actions for each constraint
+    // Returns result indicating whether execution should proceed
+    CheckPreExecution(ctx context.Context, job *Job, runID string) (ConstraintCheckResult, error)
 
-    // CheckPostExecution evaluates all post-execution constraints for a job run
-    CheckPostExecution(ctx context.Context, job *Job, runID string, startTime, endTime time.Time, exitCode int) ([]ConstraintViolation, error)
+    // CheckPostExecution evaluates all post-execution constraints
+    CheckPostExecution(ctx context.Context, job *Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error)
 }
 
-type ConstraintViolation struct {
-    ConstraintName string
-    Severity       ViolationSeverity  // Warning or Error
-    Message        string
-    Timestamp      time.Time
+type ConstraintCheckResult struct {
+    ShouldProceed bool   // false if constraints prevent execution
+    Message       string // Summary of constraint evaluation and actions taken
 }
-
-type ViolationSeverity int
-
-const (
-    ViolationWarning ViolationSeverity = iota  // Log but continue
-    ViolationError                              // Trigger action
-)
 ```
 
 **Orchestrator responsibilities:**
 - Call `CheckPreExecution()` during ConditionRunning state
-- If violations with Severity=Error exist, transition to ActionPending
-- If only warnings or no violations, transition to ContainerCreating
+- If `ShouldProceed` is true, transition to ContainerCreating
+- If `ShouldProceed` is false, transition to Failed or Retrying (based on result)
 - Call `CheckPostExecution()` during Terminating state
-- Record all violations in metrics
+- Record constraint check results in metrics
 
-**Constraint checker responsibilities (separate module):**
-- Implement all constraint logic
-- Query scheduler, database, external services as needed
-- Return violations with appropriate severity
+**How Constraint-Action System Actually Works (separate module - not part of orchestrator):**
 
-### 4. Action Execution Interface
-
-The orchestrator delegates action execution to a pluggable action executor module.
-
-```go
-type ActionExecutor interface {
-    // ExecuteAction determines and executes the appropriate action for constraint violations
-    ExecuteAction(ctx context.Context, job *Job, runID string, violations []ConstraintViolation) (ActionResult, error)
-}
-
-type ActionResult struct {
-    Action   string  // Name of action executed (for logging/metrics)
-    Outcome  ActionOutcome
-    Message  string
-}
-
-type ActionOutcome int
-
-const (
-    ActionProceed  ActionOutcome = iota  // Continue to execution
-    ActionSkip                            // Skip this run (transition to Completed)
-    ActionFail                            // Fail this run (transition to Failed)
-    ActionRetry                           // Retry later (transition to Retrying)
-)
+In the job configuration, constraints are defined with associated action lists:
+```yaml
+constraints:
+  - constraint1:
+      config: {...}
+      onViolation:
+        - action1
+        - action2
+      onMet:
+        - action3
 ```
 
-**Orchestrator responsibilities:**
-- Call `ExecuteAction()` during ActionRunning state
-- Handle ActionResult.Outcome:
-  - `ActionProceed`: Transition to ContainerCreating
-  - `ActionSkip`: Transition to Completed
-  - `ActionFail`: Transition to Failed
-  - `ActionRetry`: Transition to Retrying
-- Record action execution in metrics
+**Implementation details (separate module):**
+- Each `Constraint` struct implements a `Constraint` interface with:
+  - `Check()`: Evaluates the constraint
+  - `OnViolation()`: Runs the action list when constraint is violated
+  - `OnMet()`: Runs the action list when constraint is met
 
-**Action executor responsibilities (separate module):**
-- Implement all action logic
-- Determine which action to execute based on violations
-- Execute action (cancel orchestrators, delay, trigger webhooks, etc.)
-- Return result indicating how orchestrator should proceed
+- Each `Action` struct implements an `Action` interface with:
+  - `Take()`: Executes the action
 
-### 5. Retry Logic
+**Communication & Context:**
+- All constraints need access to an inbox for sending messages to the scheduler loop and orchestrator
+- All constraints need access to a webhook handler (webhooks are a specific action type)
+- This is provided via a Context that gets passed from constraint into each action
+- The orchestrator provides these dependencies when calling the constraint checker
+
+**From Orchestrator's Perspective:**
+The orchestrator simply calls `CheckPreExecution()` and receives back a `ShouldProceed` boolean. All the complexity of:
+- Evaluating each constraint
+- Calling appropriate action lists (onViolation/onMet)
+- Executing individual actions
+- Determining if execution should proceed
+
+...happens inside the constraint/action module. The orchestrator doesn't need to understand these details.
+
+### 4. Retry Logic
 
 The orchestrator coordinates retry attempts based on job configuration.
 
@@ -499,6 +484,10 @@ type Orchestrator struct {
     configUpdate   chan *Job
     schedulerInbox *inbox.Inbox
 
+    // Dependencies for constraint/action system
+    webhookHandler *webhook.Handler  // Passed to constraints for webhook actions
+    constraintChecker ConstraintChecker // For evaluating constraints
+
     // Metrics tracking
     metrics        *OrchestratorMetrics
     stateTracker   *StateTracker
@@ -529,6 +518,8 @@ func NewOrchestrator(
     jobConfig *Job,
     scheduledAt time.Time,
     schedulerInbox *inbox.Inbox,
+    webhookHandler *webhook.Handler,
+    constraintChecker ConstraintChecker,
     k8sClient kubernetes.Interface,
     logger *slog.Logger,
 ) *Orchestrator {
@@ -542,6 +533,8 @@ func NewOrchestrator(
         cancelChan:      make(chan struct{}),
         configUpdate:    make(chan *Job, 1),
         schedulerInbox:  schedulerInbox,
+        webhookHandler:  webhookHandler,
+        constraintChecker: constraintChecker,
         metrics:         NewOrchestratorMetrics(runID, jobID, scheduledAt),
         stateTracker:    NewStateTracker(),
         retryAttempt:    0,

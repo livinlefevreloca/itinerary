@@ -119,16 +119,17 @@ TestLifecycle_Constraints_AllPass
 - Should record zero violations in metrics
 
 TestLifecycle_Constraints_ViolationsReturned
-- Mock ConstraintChecker returns violations with Severity=Error
-- Should transition to ActionPending
-- Should pass violations to ActionExecutor
-- Should record violations count in metrics
+- Mock ConstraintChecker returns ShouldProceed=false
+- Should transition to Failed or Retrying
+- Should record constraint check failure in metrics
 
-TestLifecycle_Constraints_WarningsOnly
-- Mock ConstraintChecker returns violations with Severity=Warning
-- Should log warnings
-- Should transition directly to ContainerCreating (no action needed)
-- Should record warnings in metrics
+TestLifecycle_Constraints_ViolationWithActionsResolve
+- Mock ConstraintChecker initially has violations
+- Constraint checker internally executes onViolation actions
+- Actions resolve the issue (e.g., wait for resources)
+- ConstraintChecker returns ShouldProceed=true
+- Should transition to ContainerCreating
+- Should record successful constraint resolution in metrics
 
 TestLifecycle_Constraints_CheckError
 - Mock ConstraintChecker returns error
@@ -137,37 +138,26 @@ TestLifecycle_Constraints_CheckError
 - Should record error in metrics
 ```
 
-#### Action Execution Phase Tests
+#### Action Communication Tests
 ```go
-TestLifecycle_Action_Proceed
-- Mock ActionExecutor returns ActionProceed
-- Should transition to ContainerCreating
-- Should continue to execution
-- Should record action in metrics
+TestLifecycle_Action_StateChangeMessages
+- Mock ConstraintChecker sends state change messages during action execution
+- Should transition orchestrator to ActionPending when actions start
+- Should transition to ActionRunning while actions execute
+- Should transition to appropriate state when actions complete
+- Verify orchestrator correctly handles state change messages from actions
 
-TestLifecycle_Action_Skip
-- Mock ActionExecutor returns ActionSkip
-- Should transition to Completed
-- Should not create Kubernetes job
-- Should record action in metrics
+TestLifecycle_Action_LongRunningAction
+- Mock ConstraintChecker executes long-running action (e.g., wait 5 seconds)
+- Orchestrator should remain in ActionRunning state
+- Should continue sending heartbeats during action execution
+- Should eventually complete when action finishes
 
-TestLifecycle_Action_Fail
-- Mock ActionExecutor returns ActionFail
-- Should transition to Failed
-- Should not create Kubernetes job
-- Should record action in metrics
-
-TestLifecycle_Action_Retry
-- Mock ActionExecutor returns ActionRetry
-- Should transition to Retrying
-- Should calculate retry delay
-- Should record action in metrics
-
-TestLifecycle_Action_ExecutionError
-- Mock ActionExecutor returns error
-- Should transition to Failed
-- Should log error
-- Should record error in metrics
+TestLifecycle_Action_CancellationDuringAction
+- Mock ConstraintChecker is executing action
+- Cancel orchestrator while in ActionRunning state
+- Action execution should be cancelled
+- Should transition to Cancelled
 ```
 
 #### Execution Phase Tests
@@ -524,9 +514,10 @@ TestIntegration_HappyPath
 
 TestIntegration_WithConstraints
 - Job with mock constraint checker
-- Mock returns constraint violations
-- Mock action executor handles violations
-- Eventually proceeds to execution after action completes
+- Mock returns constraint violations initially
+- Constraint checker internally executes onViolation actions
+- Actions resolve violations
+- Eventually returns ShouldProceed=true and proceeds to execution
 - Verify complete flow with metrics
 
 TestIntegration_WithRetry
@@ -589,6 +580,8 @@ func waitForState(t *testing.T, orch *Orchestrator, state OrchestratorStatus, ti
 func triggerCancellation(orch *Orchestrator)
 func createMockK8sClient() kubernetes.Interface
 func createMockSchedulerInbox() *inbox.Inbox
+func createMockWebhookHandler() *webhook.Handler
+func createMockConstraintChecker() ConstraintChecker
 func verifyJobDeleted(t *testing.T, k8sClient kubernetes.Interface, jobName string)
 func countHeartbeats(inbox *inbox.Inbox) int
 func waitForCompletion(t *testing.T, orch *Orchestrator, timeout time.Duration) OrchestratorStatus
