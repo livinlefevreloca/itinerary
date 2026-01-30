@@ -44,3 +44,13 @@ When implementing features for the Itinerary project, follow this strict procedu
 * Use clear, descriptive variable and function names
 * Add comments for complex logic
 * Keep functions small and focused
+
+### Testing Principles
+* **NO DEFENSIVE NIL CHECKS FOR TESTS**
+* Never add nil checks or defensive coding to production code just because tests create minimal structs
+* Instead, tests should create fully-formed instances with all required dependencies
+* Use proper dependency injection - always inject dependencies, never pass nil
+* For optional dependencies, use null object pattern (e.g., NoOpConstraintChecker) rather than nil
+* If a field is required for the code to work, it should be a parameter in the constructor
+* Tests should go through constructors like `NewOrchestrator()`, not struct literals
+* Production code should assume all injected dependencies are present and valid
