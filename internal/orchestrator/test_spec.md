@@ -330,94 +330,7 @@ TestRetry_CancellationDuringRetry
 - Should not attempt retry
 ```
 
-### 6. Kubernetes Integration Tests
-
-#### Job Creation Tests
-```go
-TestKubernetes_CreateJob
-- Create Kubernetes job from pod spec
-- Verify job is created in cluster
-- Verify labels are set correctly (job-id, run-id, scheduled-at)
-- Verify pod spec matches job config
-
-TestKubernetes_CreateJob_InvalidSpec
-- Job config has invalid pod spec
-- Should return error
-- Should transition to Failed
-
-TestKubernetes_CreateJob_AlreadyExists
-- Job with same name already exists
-- Should handle gracefully
-- Should either use existing or create with unique name
-
-TestKubernetes_CreateJob_NamespaceNotFound
-- Target namespace doesn't exist
-- Should return error
-- Should transition to Failed
-```
-
-#### Pod Monitoring Tests
-```go
-TestKubernetes_PodWatcher_Success
-- Job pod transitions Pending → Running → Succeeded
-- Should track each phase transition
-- Should capture exit code 0
-- Should transition orchestrator states accordingly
-
-TestKubernetes_PodWatcher_Failure
-- Job pod transitions Pending → Running → Failed
-- Should capture exit code (non-zero)
-- Should transition to Failed or Retrying
-
-TestKubernetes_PodWatcher_PodDeleted
-- Pod is deleted externally while orchestrator running
-- Should detect deletion
-- Should handle as failure
-
-TestKubernetes_PodWatcher_MultipleRestarts
-- Pod restarts multiple times (CrashLoopBackOff)
-- Should track restart count
-- Should eventually timeout or fail
-```
-
-#### Log Retrieval Tests
-```go
-TestKubernetes_RetrieveLogs_Success
-- Job completes successfully
-- Retrieve pod logs
-- Verify logs are captured
-- Verify logs stored/returned correctly
-
-TestKubernetes_RetrieveLogs_PodGone
-- Attempt to retrieve logs after pod deleted
-- Should handle gracefully
-- Should log warning but not fail orchestrator
-
-TestKubernetes_RetrieveLogs_TooLarge
-- Pod logs exceed size limit
-- Should truncate logs
-- Should include truncation marker
-```
-
-#### Cleanup Tests
-```go
-TestKubernetes_Cleanup_Success
-- Job completes
-- Should delete job resource
-- Should verify pod is cleaned up
-- Should handle cleanup errors gracefully
-
-TestKubernetes_Cleanup_OnCancellation
-- Cancel orchestrator
-- Should delete job immediately
-- Should not wait for completion
-
-TestKubernetes_Cleanup_OrphanedJob
-- Orchestrator marked orphaned
-- Job should remain running (handled by scheduler/operator)
-```
-
-### 7. Metrics Collection Tests
+### 6. Metrics Collection Tests
 
 ```go
 TestMetrics_PhaseTimings
@@ -503,11 +416,13 @@ TestError_ResourceExhaustion
 
 ### 8. Integration Tests
 
+**Note:** Integration tests verify the complete orchestrator lifecycle with all components working together, but still use `fake.Clientset` for Kubernetes operations.
+
 ```go
 TestIntegration_HappyPath
 - Complete end-to-end orchestrator lifecycle
 - PreRun → Pending → ContainerCreating → Running → Terminating → Completed
-- Verify Kubernetes job created and completes
+- Verify fake Kubernetes job created and completes
 - Verify all metrics collected
 - Verify completion message sent
 
@@ -546,28 +461,81 @@ TestIntegration_MultipleRetries
 - Verify metrics track all attempts
 ```
 
-### 9. Mock Tests (No Real Kubernetes)
+### 9. Mock Tests
 
+**Note:** All orchestrator tests use `fake.Clientset` from `k8s.io/client-go/kubernetes/fake` for Kubernetes operations. This provides a fully functional in-memory Kubernetes client without requiring an actual cluster. Real integration tests with Docker-in-Docker will be added later for the full scheduler system.
+
+#### Mock Kubernetes Client Tests
 ```go
 TestMock_FullLifecycle
-- Use mock Kubernetes client
-- Simulate complete lifecycle
+- Use fake.NewSimpleClientset()
+- Simulate complete lifecycle with pod state changes
 - Verify state transitions
 - Verify all messages sent
 
-TestMock_PodFailureScenarios
-- Mock pod failures (exit codes 1-255)
-- Verify appropriate handling for each
+TestMock_JobCreation
+- Create Kubernetes job from pod spec using fake client
+- Verify job is created in fake client
+- Verify labels are set correctly (job-id, run-id, scheduled-at)
+- Verify pod spec matches job config
 
-TestMock_KubernetesClientErrors
-- Mock various K8s API errors
+TestMock_JobCreation_InvalidSpec
+- Job config has invalid pod spec
+- Should return error
+- Should transition to Failed
+
+TestMock_PodWatcher_Success
+- Create fake pod in Pending state
+- Transition to Running, then Succeeded
+- Should track each phase transition
+- Should capture exit code 0
+- Should transition orchestrator states accordingly
+
+TestMock_PodWatcher_Failure
+- Create fake pod that transitions to Failed
+- Should capture exit code (non-zero)
+- Should transition to Failed or Retrying
+
+TestMock_PodWatcher_PodDeleted
+- Delete fake pod while orchestrator running
+- Should detect deletion via watch
+- Should handle as failure
+
+TestMock_PodFailureScenarios
+- Test various pod failure scenarios (exit codes 1-255)
+- Verify appropriate orchestrator handling for each
+
+TestMock_KubernetesAPIErrors
+- Simulate K8s API errors from fake client
 - Verify error handling
 - Verify retry logic
 
+TestMock_LogRetrieval
+- Fake pod completes successfully
+- Mock log retrieval from fake client
+- Verify logs are captured
+
+TestMock_Cleanup
+- Job completes
+- Verify job resource deleted from fake client
+- Handle cleanup errors gracefully
+
+TestMock_CleanupOnCancellation
+- Cancel orchestrator during execution
+- Verify job deleted immediately from fake client
+```
+
+#### Mock Constraint/Action Tests
+```go
 TestMock_ConstraintChecks
 - Mock ConstraintChecker interface
 - Test orchestrator's constraint checking phase in isolation
 - Verify correct state transitions based on constraint results
+
+TestMock_ActionExecution
+- Mock ConstraintChecker with various action scenarios
+- Verify orchestrator handles action outcomes correctly
+- Verify state transitions match action results
 ```
 
 ## Helper Functions
@@ -577,11 +545,13 @@ TestMock_ConstraintChecks
 func createTestOrchestrator(t *testing.T, jobConfig *Job) *Orchestrator
 func waitForState(t *testing.T, orch *Orchestrator, state OrchestratorStatus, timeout time.Duration)
 func triggerCancellation(orch *Orchestrator)
-func createMockK8sClient() kubernetes.Interface
+func createFakeK8sClient() *fake.Clientset  // Returns fake.NewSimpleClientset()
 func createMockSchedulerInbox() *inbox.Inbox
 func createMockWebhookHandler() *webhook.Handler
 func createMockConstraintChecker() ConstraintChecker
-func verifyJobDeleted(t *testing.T, k8sClient kubernetes.Interface, jobName string)
+func verifyJobCreated(t *testing.T, fakeClient *fake.Clientset, jobName string)
+func verifyJobDeleted(t *testing.T, fakeClient *fake.Clientset, jobName string)
+func simulatePodStateChange(fakeClient *fake.Clientset, podName string, newPhase corev1.PodPhase)
 func countHeartbeats(inbox *inbox.Inbox) int
 func waitForCompletion(t *testing.T, orch *Orchestrator, timeout time.Duration) OrchestratorStatus
 ```
@@ -597,4 +567,4 @@ Tests must:
 - ✅ All error paths are tested
 - ✅ Metrics collection is verified
 - ✅ Cancellation is tested in all phases
-- ✅ Kubernetes integration is tested (with mocks and real cluster)
+- ✅ Kubernetes integration is tested using `fake.Clientset` (real cluster tests via DinD will be added later for full scheduler)
