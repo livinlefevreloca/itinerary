@@ -20,7 +20,7 @@ func TestStatePaths_HappyPath(t *testing.T) {
 		// Use past scheduled time so it starts immediately
 		// We'll test actual waiting in lifecycle tests
 		now().Add(-1*time.Second),
-		nil, // no constraint checker
+		createNoOpConstraintChecker(), // no constraints
 		createFakeK8sClient(),
 		createTestLogger(),
 	)
@@ -116,7 +116,7 @@ func TestStatePaths_WithActions(t *testing.T) {
 		"test-run-id",
 		&Job{ID: "test-job", Name: "test"},
 		now().Add(-1*time.Second),
-		nil,
+		createNoOpConstraintChecker(),
 		createFakeK8sClient(),
 		createTestLogger(),
 	)
@@ -182,7 +182,7 @@ func TestStatePaths_WithRetry(t *testing.T) {
 			},
 		},
 		now().Add(-1*time.Second),
-		nil,
+		createNoOpConstraintChecker(),
 		createFakeK8sClient(),
 		createTestLogger(),
 	)
@@ -310,7 +310,7 @@ func TestStatePaths_Cancellation(t *testing.T) {
 				"test-run-id",
 				&Job{ID: "test-job", Name: "test"},
 				now().Add(-1*time.Second),
-				nil,
+				createNoOpConstraintChecker(),
 				createFakeK8sClient(),
 				createTestLogger(),
 			)
@@ -333,7 +333,7 @@ func TestStatePaths_Failure(t *testing.T) {
 		"test-run-id",
 		&Job{ID: "test-job", Name: "test"},
 		now().Add(-1*time.Second),
-		nil,
+		createNoOpConstraintChecker(),
 		createFakeK8sClient(),
 		createTestLogger(),
 	)

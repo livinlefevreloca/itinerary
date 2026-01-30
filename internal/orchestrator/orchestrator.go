@@ -219,7 +219,7 @@ func (o *Orchestrator) runPending() {
 	state := o.state.(*PendingState)
 
 	// Check if we need to run constraint checks
-	if o.constraintChecker != nil && len(o.jobConfig.ConstraintConfig) > 0 {
+	if len(o.jobConfig.ConstraintConfig) > 0 {
 		// Transition to constraint checking phase
 		o.timing.ConstraintCheckStarted = time.Now()
 		o.transitionTo(state.ToConditionPending())

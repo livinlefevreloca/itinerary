@@ -59,6 +59,25 @@ type MockWebhookHandler struct {
 	// Add fields as needed
 }
 
+// createNoOpConstraintChecker creates a no-op constraint checker (for jobs with no constraints)
+func createNoOpConstraintChecker() *NoOpConstraintChecker {
+	return &NoOpConstraintChecker{}
+}
+
+type NoOpConstraintChecker struct{}
+
+func (n *NoOpConstraintChecker) CheckPreExecution(ctx context.Context, job *Job, runID string) (ConstraintCheckResult, error) {
+	return ConstraintCheckResult{ShouldProceed: true, Message: "no constraints"}, nil
+}
+
+func (n *NoOpConstraintChecker) CheckPostExecution(ctx context.Context, job *Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error) {
+	return ConstraintCheckResult{ShouldProceed: true, Message: "no constraints"}, nil
+}
+
+func (n *NoOpConstraintChecker) ShouldRecheckOnRetry(job *Job) bool {
+	return false
+}
+
 // createMockConstraintChecker creates a mock constraint checker for testing
 func createMockConstraintChecker(shouldProceed bool, err error) *MockConstraintChecker {
 	return &MockConstraintChecker{
