@@ -53,15 +53,26 @@ type MockWebhookHandler struct {
 // createMockConstraintChecker creates a mock constraint checker for testing
 func createMockConstraintChecker(shouldProceed bool, err error) *MockConstraintChecker {
 	return &MockConstraintChecker{
-		shouldProceed: shouldProceed,
-		err:           err,
+		shouldProceed:     shouldProceed,
+		err:               err,
+		recheckOnRetry:    false, // Default: don't recheck
+	}
+}
+
+// createMockConstraintCheckerWithRecheck creates a mock with configurable retry behavior
+func createMockConstraintCheckerWithRecheck(shouldProceed bool, recheckOnRetry bool, err error) *MockConstraintChecker {
+	return &MockConstraintChecker{
+		shouldProceed:  shouldProceed,
+		recheckOnRetry: recheckOnRetry,
+		err:            err,
 	}
 }
 
 type MockConstraintChecker struct {
-	shouldProceed bool
-	err           error
-	checkCount    int
+	shouldProceed  bool
+	recheckOnRetry bool
+	err            error
+	checkCount     int
 }
 
 func (m *MockConstraintChecker) CheckPreExecution(ctx context.Context, job *Job, runID string) (ConstraintCheckResult, error) {
@@ -78,6 +89,10 @@ func (m *MockConstraintChecker) CheckPostExecution(ctx context.Context, job *Job
 		ShouldProceed: m.shouldProceed,
 		Message:       "mock result",
 	}, m.err
+}
+
+func (m *MockConstraintChecker) ShouldRecheckOnRetry(job *Job) bool {
+	return m.recheckOnRetry
 }
 
 // waitForState waits for orchestrator to reach a specific state

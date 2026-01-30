@@ -320,6 +320,10 @@ type ConstraintChecker interface {
 
     // CheckPostExecution evaluates all post-execution constraints
     CheckPostExecution(ctx context.Context, job *Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error)
+
+    // ShouldRecheckOnRetry returns true if any constraints need to be re-evaluated on retry
+    // Orchestrator uses this to decide: Retrying → ConditionPending vs Retrying → Pending
+    ShouldRecheckOnRetry(job *Job) bool
 }
 
 type ConstraintCheckResult struct {
@@ -341,12 +345,18 @@ In the job configuration, constraints are defined with associated action lists:
 ```yaml
 constraints:
   - constraint1:
+      recheckOnRetry: true  # Re-evaluate this constraint on retry
       config: {...}
       onViolation:
         - action1
         - action2
       onMet:
         - action3
+  - constraint2:
+      recheckOnRetry: false  # Skip this constraint on retry
+      config: {...}
+      onViolation:
+        - action4
 ```
 
 **Implementation details (separate module):**
@@ -383,7 +393,6 @@ type RetryConfig struct {
     InitialDelay        time.Duration
     BackoffMultiplier   float64
     MaxDelay            time.Duration
-    RecheckConstraints  bool  // If true, retry goes to ConditionPending instead of Pending
 }
 
 func shouldRetry(retryConfig *RetryConfig, currentAttempt int) bool {
@@ -403,11 +412,17 @@ func calculateRetryDelay(retryConfig *RetryConfig, attempt int) time.Duration {
 **Retry behavior:**
 - On job failure, check if retries are configured and remaining
 - If yes: transition to `Retrying`, calculate delay, wait, then:
-  - If `RecheckConstraints` is true: transition to `ConditionPending` (re-evaluate constraints before retry)
-  - If `RecheckConstraints` is false: transition to `Pending` (skip constraint checks, go directly to execution)
+  - Ask constraint checker: `ShouldRecheckOnRetry(job)`
+  - If any constraints need rechecking: transition to `ConditionPending`
+  - If no constraints need rechecking: transition to `Pending`
 - If no: transition to `Failed`
 - Track attempt number in orchestrator metrics
-- Each retry can optionally re-check constraints to ensure conditions are still met
+
+**Constraint re-check on retry:**
+- Each constraint can specify `recheckOnRetry: true/false` in its configuration
+- Constraint checker evaluates which constraints need rechecking
+- Orchestrator asks constraint checker whether to skip or re-check constraints
+- This allows fine-grained control: some constraints check external conditions that may change, others don't
 
 ### 6. Database Updates
 

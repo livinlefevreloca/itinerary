@@ -331,18 +331,18 @@ TestRetry_CancellationDuringRetry
 - Should not attempt retry
 
 TestRetry_RecheckConstraints
-- Job with RecheckConstraints=true
+- Mock constraint checker returns ShouldRecheckOnRetry() = true
 - First attempt fails
 - Should transition Retrying → ConditionPending (not Pending)
-- Should re-evaluate constraints before retry attempt
-- Verify constraint checker is called again
+- Should call CheckPreExecution() again before retry attempt
+- Verify constraint checker called on retry
 
 TestRetry_SkipConstraintRecheck
-- Job with RecheckConstraints=false
+- Mock constraint checker returns ShouldRecheckOnRetry() = false
 - First attempt fails
 - Should transition Retrying → Pending (skip ConditionPending)
-- Should not re-evaluate constraints
-- Verify constraint checker is not called on retry
+- Should not call CheckPreExecution() on retry
+- Should go directly to execution
 ```
 
 ### 6. Metrics Collection Tests
@@ -563,7 +563,8 @@ func triggerCancellation(orch *Orchestrator)
 func createFakeK8sClient() *fake.Clientset  // Returns fake.NewSimpleClientset()
 func createMockSchedulerInbox() *inbox.Inbox
 func createMockWebhookHandler() *webhook.Handler
-func createMockConstraintChecker() ConstraintChecker
+func createMockConstraintChecker(shouldProceed bool, err error) *MockConstraintChecker
+func createMockConstraintCheckerWithRecheck(shouldProceed bool, recheckOnRetry bool, err error) *MockConstraintChecker
 func verifyJobCreated(t *testing.T, fakeClient *fake.Clientset, jobName string)
 func verifyJobDeleted(t *testing.T, fakeClient *fake.Clientset, jobName string)
 func simulatePodStateChange(fakeClient *fake.Clientset, podName string, newPhase corev1.PodPhase)
