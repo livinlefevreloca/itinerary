@@ -166,7 +166,6 @@ func (o *Orchestrator) transitionTo(newState OrchestratorStatus) error {
         if newState == allowedState {
             o.previousState = o.state
             o.state = newState
-            o.stateTransitionTime = time.Now()
             return nil
         }
     }
@@ -474,7 +473,6 @@ type Orchestrator struct {
     // State management
     state              OrchestratorStatus
     previousState      OrchestratorStatus
-    stateTransitionTime time.Time
 
     // State machine validation
     transitionLock     sync.Mutex  // Protects state transitions
@@ -490,7 +488,6 @@ type Orchestrator struct {
 
     // Metrics tracking
     metrics        *OrchestratorMetrics
-    stateTracker   *StateTracker
 
     // Retry tracking
     retryAttempt   int
@@ -499,10 +496,11 @@ type Orchestrator struct {
     // Kubernetes client
     k8sClient      kubernetes.Interface
 
-    // Timing
-    createdAt      time.Time
-    startedAt      time.Time
-    completedAt    time.Time
+    // Phase timing (mark boundaries, calculate durations)
+    createdAt               time.Time
+    constraintCheckStarted  time.Time
+    executionStartedAt      time.Time
+    completedAt             time.Time
 
     // Logging
     logger         *slog.Logger
@@ -523,24 +521,23 @@ func NewOrchestrator(
     k8sClient kubernetes.Interface,
     logger *slog.Logger,
 ) *Orchestrator {
+    now := time.Now()
     return &Orchestrator{
         runID:           runID,
         jobID:           jobID,
         jobConfig:       jobConfig,
         scheduledAt:     scheduledAt,
         state:           OrchestratorPreRun,
-        stateTransitionTime: time.Now(),
         cancelChan:      make(chan struct{}),
         configUpdate:    make(chan *Job, 1),
         schedulerInbox:  schedulerInbox,
         webhookHandler:  webhookHandler,
         constraintChecker: constraintChecker,
         metrics:         NewOrchestratorMetrics(runID, jobID, scheduledAt),
-        stateTracker:    NewStateTracker(),
         retryAttempt:    0,
         maxRetries:      getMaxRetries(jobConfig),
         k8sClient:       k8sClient,
-        createdAt:       time.Now(),
+        createdAt:       now,
         logger:          logger.With("run_id", runID, "job_id", jobID),
     }
 }
@@ -604,9 +601,8 @@ type RetryConfig struct {
 
 ### Phase 4: Full Metrics & Observability
 1. Complete OrchestratorMetrics implementation
-2. State duration tracking
-3. Phase timing metrics
-4. Submit metrics to stats collector on completion
+2. Phase boundary timing (minimal time.Now() calls)
+3. Submit metrics to stats collector on completion
 
 **Note:** Specific constraint types and action types will be implemented in separate modules (not part of orchestrator)
 
@@ -713,17 +709,12 @@ type OrchestratorMetrics struct {
     ScheduledAt time.Time
 
     // Phase timing (duration spent in each phase)
+    // Calculated from phase boundary timestamps
     PreRunDuration            time.Duration  // Time waiting for scheduled time
-    ConstraintCheckDuration   time.Duration  // Time checking constraints
-    ActionExecutionDuration   time.Duration  // Time executing actions
-    ContainerCreationDuration time.Duration  // Time creating Kubernetes resources
-    ExecutionDuration         time.Duration  // Time job was running
+    ConstraintCheckDuration   time.Duration  // Time checking constraints + executing actions
+    ExecutionDuration         time.Duration  // Time job was running (pod running)
     TerminationDuration       time.Duration  // Time in cleanup/termination
     TotalDuration             time.Duration  // End-to-end time
-
-    // State transition counts
-    StateTransitionCount      int            // Total number of state changes
-    StateTransitionTimestamps map[OrchestratorStatus]time.Time
 
     // Constraint/Action metrics
     ConstraintsChecked        int            // Number of constraints evaluated
@@ -737,7 +728,7 @@ type OrchestratorMetrics struct {
 
     // Kubernetes metrics
     KubernetesAPICalls        int            // Number of K8s API calls made
-    PodStartLatency           time.Duration  // Time from creation to running
+    PodStartLatency           time.Duration  // Time from job creation to pod running
     PodExitCode               int            // Final pod exit code
 
     // Heartbeat metrics
@@ -750,56 +741,47 @@ type OrchestratorMetrics struct {
 }
 ```
 
-#### State Duration Tracking
-The orchestrator maintains timestamps for each state entry:
+#### Phase Timing Strategy
+
+To minimize performance overhead from frequent `time.Now()` calls, the orchestrator only captures timestamps at **phase boundaries**, not at every state transition.
+
+**Phase Boundary Timestamps:**
 ```go
-type StateTracker struct {
-    currentState      OrchestratorStatus
-    stateEntryTime    time.Time
-    stateDurations    map[OrchestratorStatus]time.Duration
-}
-
-func (st *StateTracker) enterState(state OrchestratorStatus) {
-    now := time.Now()
-
-    // Record duration of previous state
-    if st.currentState != 0 {
-        duration := now.Sub(st.stateEntryTime)
-        st.stateDurations[st.currentState] += duration
-    }
-
-    st.currentState = state
-    st.stateEntryTime = now
-}
+// In Orchestrator struct:
+createdAt               time.Time  // When orchestrator created (PreRun start)
+constraintCheckStarted  time.Time  // When entering ConditionPending
+executionStartedAt      time.Time  // When pod starts running
+completedAt             time.Time  // When reaching terminal state
 ```
+
+**Duration Calculations (on completion):**
+```go
+metrics.PreRunDuration = o.constraintCheckStarted.Sub(o.createdAt)
+metrics.ConstraintCheckDuration = o.executionStartedAt.Sub(o.constraintCheckStarted)
+metrics.ExecutionDuration = o.completedAt.Sub(o.executionStartedAt)
+metrics.TotalDuration = o.completedAt.Sub(o.createdAt)
+```
+
+This reduces `time.Now()` calls from ~20 per run to ~4-5 per run.
 
 #### Metrics Collection Points
 
-**On State Transition:**
-- Record timestamp
-- Increment state transition counter
-- Calculate duration in previous state
-
 **On Constraint Check:**
 - Increment constraints checked counter
-- Record constraint evaluation time
 - If violated, increment violations counter
 
 **On Action Execution:**
 - Increment actions executed counter
-- Record action execution time
 - If failed, increment action failures counter
 
 **On Kubernetes Operation:**
 - Increment API call counter
-- Record operation latency
 
 **On Heartbeat:**
 - Increment heartbeats sent counter
 
 **On Completion:**
-- Calculate all phase durations
-- Calculate total duration
+- Calculate phase durations from boundary timestamps
 - Package all metrics
 - Send to stats collector
 

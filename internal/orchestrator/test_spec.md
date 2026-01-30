@@ -61,21 +61,23 @@ TestStateTransition_RetryPhase
 - Verify Retrying → Completed is invalid
 ```
 
-#### State Duration Tracking Tests
+#### Phase Timing Tests
 ```go
-TestStateTracker_DurationTracking
-- Transition through multiple states
-- Verify duration is recorded for each state
-- Verify durations sum to total elapsed time
+TestPhaseTiming_Boundaries
+- Orchestrator goes through complete lifecycle
+- Verify phase boundary timestamps are captured:
+  - createdAt when orchestrator created
+  - constraintCheckStarted when entering ConditionPending
+  - executionStartedAt when pod starts running
+  - completedAt when reaching terminal state
 
-TestStateTracker_StateDurations
-- Stay in Running state for 100ms
-- Stay in Terminating state for 50ms
-- Verify durations are approximately correct (within margin)
-
-TestStateTracker_MultipleVisits
-- Transition Pending → ConditionPending → Pending (retry)
-- Verify durations accumulate for revisited states
+TestPhaseTiming_Durations
+- Run orchestrator with known delays in each phase
+- Verify calculated phase durations are approximately correct:
+  - PreRunDuration = constraintCheckStarted - createdAt
+  - ConstraintCheckDuration = executionStartedAt - constraintCheckStarted
+  - ExecutionDuration = completedAt - executionStartedAt
+  - TotalDuration = completedAt - createdAt
 ```
 
 ### 2. Lifecycle Tests
@@ -420,14 +422,11 @@ TestKubernetes_Cleanup_OrphanedJob
 ```go
 TestMetrics_PhaseTimings
 - Orchestrator goes through all phases
-- Verify timing metrics for each phase
-- PreRunDuration, ConstraintCheckDuration, etc. should be > 0
-- Sum of phase durations should equal total duration
-
-TestMetrics_StateTransitions
-- Transition through multiple states
-- Verify StateTransitionCount is accurate
-- Verify all states have timestamps
+- Verify phase timing metrics are populated:
+  - PreRunDuration > 0
+  - ConstraintCheckDuration > 0
+  - ExecutionDuration > 0
+  - TotalDuration equals sum of phase durations
 
 TestMetrics_ConstraintMetrics
 - Check 5 constraints, 2 violated
