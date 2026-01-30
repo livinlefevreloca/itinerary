@@ -660,6 +660,25 @@ func queryJobDefinitions(db interface{}) ([]*Job, error) {
 	return []*Job{}, nil
 }
 
+// runOrchestrator launches and manages a single orchestrator goroutine
+// TODO: Implement actual orchestrator creation and management
+func (s *Scheduler) runOrchestrator(jobID string, scheduledAt time.Time, runID string, cancelChan chan struct{}, configUpdateChan chan *Job) {
+	s.logger.Info("orchestrator stub launched",
+		"run_id", runID,
+		"job_id", jobID,
+		"scheduled_at", scheduledAt)
+
+	// TODO: Create actual orchestrator instance using orchestrator.NewOrchestrator()
+	// TODO: Pass scheduler inbox for sending messages back
+	// TODO: Handle orchestrator lifecycle
+
+	// For now, just wait for cancellation
+	<-cancelChan
+
+	s.logger.Info("orchestrator stub cancelled",
+		"run_id", runID)
+}
+
 // handleShutdown performs graceful shutdown of the scheduler
 func (s *Scheduler) handleShutdown() error {
 	s.logger.Info("shutting down scheduler")
