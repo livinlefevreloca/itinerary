@@ -199,6 +199,7 @@ func TestStateTransition_ValidTransitions(t *testing.T) {
 		{OrchestratorTerminating, OrchestratorRetrying},
 		{OrchestratorFailed, OrchestratorRetrying},
 		{OrchestratorRetrying, OrchestratorPending},
+		{OrchestratorRetrying, OrchestratorConditionPending},
 		{OrchestratorRetrying, OrchestratorFailed},
 	}
 
@@ -351,8 +352,13 @@ func TestStateTransition_RetryPhase(t *testing.T) {
 	err := orch.transitionTo(OrchestratorRetrying)
 	assert.NoError(t, err)
 
-	// Test Retrying → Pending
+	// Test Retrying → Pending (skip constraint re-check)
 	err = orch.transitionTo(OrchestratorPending)
+	assert.NoError(t, err)
+
+	// Test Retrying → ConditionPending (re-check constraints)
+	orch.state = OrchestratorRetrying
+	err = orch.transitionTo(OrchestratorConditionPending)
 	assert.NoError(t, err)
 
 	// Test Retrying → Failed (no retries left)

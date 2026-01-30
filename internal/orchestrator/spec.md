@@ -67,9 +67,15 @@ ActionPending → ActionRunning → ContainerCreating → Running →
 Terminating → Completed
 ```
 
-#### With Retry
+#### With Retry (skip constraint re-check)
 ```
-... → Running → Failed → Retrying → Pending → ... → Completed
+... → Running → Terminating → Failed → Retrying → Pending → ... → Completed
+```
+
+#### With Retry (re-check constraints)
+```
+... → Running → Terminating → Failed → Retrying → ConditionPending →
+ConditionRunning → ContainerCreating → Running → Terminating → Completed
 ```
 
 #### Cancellation (from any non-terminal state)
@@ -145,7 +151,8 @@ var allowedTransitions = map[OrchestratorStatus][]OrchestratorStatus{
         OrchestratorCancelled,
     },
     OrchestratorRetrying: {
-        OrchestratorPending,            // Retry attempt
+        OrchestratorPending,            // Retry without re-checking constraints
+        OrchestratorConditionPending,   // Retry with constraint re-check (optional)
         OrchestratorFailed,             // No retries left
         OrchestratorCancelled,
     },
@@ -372,10 +379,11 @@ The orchestrator coordinates retry attempts based on job configuration.
 
 ```go
 type RetryConfig struct {
-    MaxRetries        int
-    InitialDelay      time.Duration
-    BackoffMultiplier float64
-    MaxDelay          time.Duration
+    MaxRetries          int
+    InitialDelay        time.Duration
+    BackoffMultiplier   float64
+    MaxDelay            time.Duration
+    RecheckConstraints  bool  // If true, retry goes to ConditionPending instead of Pending
 }
 
 func shouldRetry(retryConfig *RetryConfig, currentAttempt int) bool {
@@ -394,10 +402,12 @@ func calculateRetryDelay(retryConfig *RetryConfig, attempt int) time.Duration {
 
 **Retry behavior:**
 - On job failure, check if retries are configured and remaining
-- If yes: transition to `Retrying`, calculate delay, wait, then transition to `Pending`
+- If yes: transition to `Retrying`, calculate delay, wait, then:
+  - If `RecheckConstraints` is true: transition to `ConditionPending` (re-evaluate constraints before retry)
+  - If `RecheckConstraints` is false: transition to `Pending` (skip constraint checks, go directly to execution)
 - If no: transition to `Failed`
 - Track attempt number in orchestrator metrics
-- Each retry is a full lifecycle restart from Pending state
+- Each retry can optionally re-check constraints to ensure conditions are still met
 
 ### 6. Database Updates
 

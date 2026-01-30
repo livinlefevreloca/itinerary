@@ -56,7 +56,8 @@ TestStateTransition_ExecutionPhase
 
 TestStateTransition_RetryPhase
 - Verify Failed → Retrying is valid (if retries remain)
-- Verify Retrying → Pending is valid
+- Verify Retrying → Pending is valid (skip constraint re-check)
+- Verify Retrying → ConditionPending is valid (re-check constraints)
 - Verify Retrying → Failed is valid (no retries left)
 - Verify Retrying → Completed is invalid
 ```
@@ -328,6 +329,20 @@ TestRetry_CancellationDuringRetry
 - Cancel orchestrator while in Retrying state
 - Should transition to Cancelled
 - Should not attempt retry
+
+TestRetry_RecheckConstraints
+- Job with RecheckConstraints=true
+- First attempt fails
+- Should transition Retrying → ConditionPending (not Pending)
+- Should re-evaluate constraints before retry attempt
+- Verify constraint checker is called again
+
+TestRetry_SkipConstraintRecheck
+- Job with RecheckConstraints=false
+- First attempt fails
+- Should transition Retrying → Pending (skip ConditionPending)
+- Should not re-evaluate constraints
+- Verify constraint checker is not called on retry
 ```
 
 ### 6. Metrics Collection Tests
