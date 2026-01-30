@@ -172,7 +172,9 @@ func benchmarkScheduleOrchestrators(b *testing.B, count int) {
 	logger := testutil.NewTestLogger()
 	config := DefaultSchedulerConfig()
 	syncerConfig := DefaultJobStateSyncerConfig()
-	syncerConfig.MaxBufferedUpdates = count * 10
+	// Set buffer large enough for all benchmark iterations
+	// b.N is determined dynamically, so use a very large buffer
+	syncerConfig.MaxBufferedUpdates = 1000000
 
 	scheduler := createBenchScheduler(b, config, syncerConfig, logger)
 
@@ -198,7 +200,8 @@ func benchmarkScheduleOrchestrators(b *testing.B, count int) {
 
 		// Clear for next iteration
 		scheduler.activeOrchestrators = make(map[string]*OrchestratorState)
-		// Note: syncer buffer state is internal and cannot be directly manipulated
+		// Note: syncer buffer accumulates across iterations, but we've set
+		// MaxBufferedUpdates large enough to accommodate all b.N iterations
 	}
 }
 
