@@ -226,20 +226,16 @@ func (s *Scheduler) runOrchestrator(
 - State: `Pending → ConditionPending`
 - Check if job has pre-execution constraints defined
 - Transition: `ConditionPending → ConditionRunning`
-- Evaluate each constraint:
-  - `maxConcurrentRuns`: Check if too many instances running
-  - `requirePreviousSuccess`: Check if previous run succeeded
-  - `catchUp`: Determine if this is a catch-up run
-- Transition: `ConditionRunning → ActionPending` (if constraint violated) or `ConditionRunning → ContainerCreating` (if all pass)
+- Call constraint checker to evaluate all configured constraints
+- Constraint checker returns list of violations (if any)
+- Transition: `ConditionRunning → ActionPending` (if violations exist) or `ConditionRunning → ContainerCreating` (if all pass)
 
 **Phase 3: Pre-Execution Actions**
 - State: `ActionPending → ActionRunning`
-- Execute action based on constraint violation:
-  - `skipJob`: Skip this run
-  - `retryLater`: Delay execution
-  - `killOldInstances`: Terminate running instances
-  - `waitForCompletion`: Wait for running instances to finish
-- Transition: `ActionRunning → ContainerCreating` or `ActionRunning → Failed`
+- Call action executor with constraint violations
+- Action executor determines and executes appropriate action
+- Action executor returns result (proceed, skip, delay, etc.)
+- Transition: `ActionRunning → ContainerCreating` (proceed), `ActionRunning → Completed` (skip), or `ActionRunning → Failed` (error)
 
 **Phase 4: Execution**
 - State: `ContainerCreating`
@@ -305,93 +301,148 @@ func retrievePodLogs(runID string) (logs string, err error)
 - Store logs to database or external storage
 - Handle log truncation if too large
 
-### 3. Constraint Checking
+### 3. Constraint Checking Interface
 
-#### Pre-Execution Constraints
-```go
-func checkPreExecutionConstraints(job *Job, runID string) ([]ConstraintViolation, error)
-```
-
-**Constraints to check:**
-- `maxConcurrentRuns`: Query active orchestrators for same job
-- `requirePreviousSuccess`: Query database for last run status
-- `catchUpWindow`: Check if run is within catch-up window
-- `preRunHook`: Execute HTTP webhook before running
-
-**Returns:**
-- List of violated constraints
-- Error if check fails
-
-#### Post-Execution Constraints
-```go
-func checkPostExecutionConstraints(job *Job, startTime, endTime time.Time) ([]ConstraintViolation, error)
-```
-
-**Constraints to check:**
-- `maxExpectedRunTime`: Compare runtime to threshold
-- `maxAllowedRunTime`: Check if hard limit exceeded
-- `postRunHook`: Execute HTTP webhook after completion
-
-### 4. Action Execution
+The orchestrator delegates constraint checking to a pluggable constraint checker module.
 
 ```go
-func executeAction(action Action, job *Job, runID string) error
+type ConstraintChecker interface {
+    // CheckPreExecution evaluates all pre-execution constraints for a job run
+    CheckPreExecution(ctx context.Context, job *Job, runID string) ([]ConstraintViolation, error)
+
+    // CheckPostExecution evaluates all post-execution constraints for a job run
+    CheckPostExecution(ctx context.Context, job *Job, runID string, startTime, endTime time.Time, exitCode int) ([]ConstraintViolation, error)
+}
+
+type ConstraintViolation struct {
+    ConstraintName string
+    Severity       ViolationSeverity  // Warning or Error
+    Message        string
+    Timestamp      time.Time
+}
+
+type ViolationSeverity int
+
+const (
+    ViolationWarning ViolationSeverity = iota  // Log but continue
+    ViolationError                              // Trigger action
+)
 ```
 
-**Actions to support:**
-- `skipJob`: Mark as skipped and complete
-- `retryLater`: Delay execution by configured amount
-- `killOldInstances`: Cancel older running instances
-- `waitForCompletion`: Block until other instances finish
-- `triggerWebhook`: Send webhook notification
-- `startAnotherJob`: Trigger another job to run
+**Orchestrator responsibilities:**
+- Call `CheckPreExecution()` during ConditionRunning state
+- If violations with Severity=Error exist, transition to ActionPending
+- If only warnings or no violations, transition to ContainerCreating
+- Call `CheckPostExecution()` during Terminating state
+- Record all violations in metrics
+
+**Constraint checker responsibilities (separate module):**
+- Implement all constraint logic
+- Query scheduler, database, external services as needed
+- Return violations with appropriate severity
+
+### 4. Action Execution Interface
+
+The orchestrator delegates action execution to a pluggable action executor module.
+
+```go
+type ActionExecutor interface {
+    // ExecuteAction determines and executes the appropriate action for constraint violations
+    ExecuteAction(ctx context.Context, job *Job, runID string, violations []ConstraintViolation) (ActionResult, error)
+}
+
+type ActionResult struct {
+    Action   string  // Name of action executed (for logging/metrics)
+    Outcome  ActionOutcome
+    Message  string
+}
+
+type ActionOutcome int
+
+const (
+    ActionProceed  ActionOutcome = iota  // Continue to execution
+    ActionSkip                            // Skip this run (transition to Completed)
+    ActionFail                            // Fail this run (transition to Failed)
+    ActionRetry                           // Retry later (transition to Retrying)
+)
+```
+
+**Orchestrator responsibilities:**
+- Call `ExecuteAction()` during ActionRunning state
+- Handle ActionResult.Outcome:
+  - `ActionProceed`: Transition to ContainerCreating
+  - `ActionSkip`: Transition to Completed
+  - `ActionFail`: Transition to Failed
+  - `ActionRetry`: Transition to Retrying
+- Record action execution in metrics
+
+**Action executor responsibilities (separate module):**
+- Implement all action logic
+- Determine which action to execute based on violations
+- Execute action (cancel orchestrators, delay, trigger webhooks, etc.)
+- Return result indicating how orchestrator should proceed
 
 ### 5. Retry Logic
 
+The orchestrator coordinates retry attempts based on job configuration.
+
 ```go
-type RetryState struct {
-    MaxRetries    int
-    CurrentAttempt int
-    RetryDelay    time.Duration
+type RetryConfig struct {
+    MaxRetries        int
+    InitialDelay      time.Duration
     BackoffMultiplier float64
+    MaxDelay          time.Duration
 }
 
-func shouldRetry(job *Job, retryState *RetryState) bool
-func calculateRetryDelay(retryState *RetryState) time.Duration
+func shouldRetry(retryConfig *RetryConfig, currentAttempt int) bool {
+    return currentAttempt < retryConfig.MaxRetries
+}
+
+func calculateRetryDelay(retryConfig *RetryConfig, attempt int) time.Duration {
+    // Exponential backoff: InitialDelay * (BackoffMultiplier ^ attempt)
+    delay := retryConfig.InitialDelay * time.Duration(math.Pow(retryConfig.BackoffMultiplier, float64(attempt)))
+    if delay > retryConfig.MaxDelay {
+        return retryConfig.MaxDelay
+    }
+    return delay
+}
 ```
 
 **Retry behavior:**
-- Check if job has retry configuration
-- Track attempt number in orchestrator state
-- Calculate exponential backoff delay
-- Maximum retry attempts configurable
-- Send state change to `Retrying` before retry
+- On job failure, check if retries are configured and remaining
+- If yes: transition to `Retrying`, calculate delay, wait, then transition to `Pending`
+- If no: transition to `Failed`
+- Track attempt number in orchestrator metrics
+- Each retry is a full lifecycle restart from Pending state
 
 ### 6. Database Updates
 
-The orchestrator sends updates to the JobStateSyncer via the scheduler for all state changes:
+The orchestrator sends updates to the JobStateSyncer for important state changes:
 
 ```go
 type JobRunUpdate struct {
-    UpdateID    string    // UUID for deduplication
-    RunID       string    // Deterministic: "jobID:timestamp"
-    JobID       string
-    ScheduledAt time.Time
-    StartedAt   time.Time
-    CompletedAt time.Time
-    Status      string
-    Success     bool
-    ExitCode    int
-    Error       string
-    Logs        string
+    UpdateID     string    // UUID for deduplication
+    RunID        string    // Deterministic: "jobID:timestamp"
+    JobID        string
+    ScheduledAt  time.Time
+    StartedAt    time.Time
+    CompletedAt  time.Time
+    Status       string
+    Success      bool
+    ExitCode     int
+    Error        string
     RetryAttempt int
 }
 ```
 
 **When to send updates:**
-- State transitions (every state change)
-- Terminal states (Completed, Failed, Cancelled)
-- Error conditions
+- Job starts executing (StartedAt timestamp)
+- Terminal states reached (Completed, Failed, Cancelled)
+- Retry attempts (increment RetryAttempt)
+
+**Not included:**
+- Every state transition (too verbose for database)
+- Metrics (sent separately to stats collector)
 
 ### 7. Heartbeat Mechanism
 
@@ -510,48 +561,14 @@ type Job struct {
     Schedule string // Cron expression
     PodSpec  string // Kubernetes pod spec (JSON or YAML)
 
-    // Constraints
-    Constraints JobConstraints
+    // Constraint/Action configuration (opaque to orchestrator)
+    // Interpreted by constraint and action modules
+    ConstraintConfig json.RawMessage  // Constraint checker interprets this
+    ActionConfig     json.RawMessage  // Action executor interprets this
 
-    // Actions
-    Actions JobActions
-
-    // Retry configuration
+    // Retry configuration (orchestrator needs to understand this)
     RetryConfig *RetryConfig
 }
-
-type JobConstraints struct {
-    MaxConcurrentRuns    int
-    RequirePreviousSuccess bool
-    CatchUp              bool
-    CatchUpWindow        time.Duration
-    MaxExpectedRunTime   time.Duration
-    MaxAllowedRunTime    time.Duration
-    PreRunHook           *WebhookConfig
-    PostRunHook          *WebhookConfig
-}
-
-type JobActions struct {
-    OnConstraintViolation Action
-    OnFailure             Action
-    OnSuccess             Action
-}
-
-type Action struct {
-    Type       ActionType
-    Parameters map[string]string
-}
-
-type ActionType string
-
-const (
-    ActionSkip            ActionType = "skip"
-    ActionRetryLater      ActionType = "retry_later"
-    ActionKillOld         ActionType = "kill_old"
-    ActionWait            ActionType = "wait"
-    ActionWebhook         ActionType = "webhook"
-    ActionTriggerJob      ActionType = "trigger_job"
-)
 
 type RetryConfig struct {
     MaxRetries        int
@@ -561,48 +578,44 @@ type RetryConfig struct {
 }
 ```
 
-### Constraint Violation
-```go
-type ConstraintViolation struct {
-    Constraint string
-    Message    string
-    Timestamp  time.Time
-}
-```
+**Design notes:**
+- `ConstraintConfig` and `ActionConfig` are opaque JSON
+- Orchestrator passes them to constraint/action modules
+- Orchestrator only needs to understand `RetryConfig` to coordinate retries
+- This allows constraint/action implementations to evolve independently
 
 ## Implementation Strategy
 
 ### Phase 1: Basic Lifecycle (MVP)
-1. Implement PreRun → Pending → ContainerCreating → Running → Terminating → Completed flow
-2. Kubernetes job creation and monitoring
-3. Basic heartbeat mechanism
-4. Basic cancellation handling
-5. Database update on terminal states
+1. Implement state machine with transition validation
+2. Implement PreRun → Pending → ContainerCreating → Running → Terminating → Completed flow (no constraints/actions)
+3. Kubernetes job creation and monitoring
+4. Heartbeat mechanism
+5. Cancellation handling
+6. Database updates on terminal states
+7. Basic metrics collection
 
-### Phase 2: Constraint Checking
-1. Implement constraint checking framework
-2. Add `maxConcurrentRuns` constraint
-3. Add `requirePreviousSuccess` constraint
-4. Add execution time constraints
-5. Database updates for constraint violations
+### Phase 2: Constraint/Action Integration
+1. Define ConstraintChecker interface
+2. Define ActionExecutor interface
+3. Add constraint checking phase (Pending → ConditionPending → ConditionRunning)
+4. Add action execution phase (ActionPending → ActionRunning)
+5. Integrate with lifecycle flow
+6. Record constraint violations and action executions in metrics
 
-### Phase 3: Action Execution
-1. Implement action execution framework
-2. Add `skip` action
-3. Add `killOld` action
-4. Add `wait` action
-5. Database updates for action executions
-
-### Phase 4: Retry Logic
+### Phase 3: Retry Logic
 1. Implement retry state tracking
-2. Add exponential backoff
-3. Handle retry transitions
-4. Track retry attempts in database
+2. Add exponential backoff calculation
+3. Handle Failed → Retrying → Pending transitions
+4. Track retry attempts in metrics
 
-### Phase 5: Webhook Integration
-1. Implement pre-run hooks
-2. Implement post-run hooks
-3. Add webhook delivery tracking
+### Phase 4: Full Metrics & Observability
+1. Complete OrchestratorMetrics implementation
+2. State duration tracking
+3. Phase timing metrics
+4. Submit metrics to stats collector on completion
+
+**Note:** Specific constraint types and action types will be implemented in separate modules (not part of orchestrator)
 
 ## External Dependencies
 
@@ -611,14 +624,28 @@ type ConstraintViolation struct {
 - Create jobs, watch pods, retrieve logs
 - Handle API errors gracefully
 
+### Constraint Checker (interface)
+- Separate module implements `ConstraintChecker` interface
+- Orchestrator calls interface methods
+- No direct dependency on constraint implementation
+
+### Action Executor (interface)
+- Separate module implements `ActionExecutor` interface
+- Orchestrator calls interface methods
+- No direct dependency on action implementation
+
 ### Job State Syncer
-- Send all state updates via scheduler's JobStateSyncer
+- Send state updates via scheduler's JobStateSyncer
 - Use `JobRunUpdate` for persistence
+
+### Stats Collector
+- Send OrchestratorMetrics on completion
+- Track per-run execution data
 
 ### Scheduler Inbox
 - Send heartbeats
-- Send state changes
-- Send completion notifications
+- Send state change notifications
+- Send completion messages
 
 ## Error Handling
 
@@ -631,13 +658,15 @@ type ConstraintViolation struct {
 - Transient errors → retry with backoff
 - Persistent errors → `Failed` state
 
-### Constraint Check Errors
-- Cannot check constraint → fail-safe decision (skip or allow)
-- Log error and continue
+### Constraint Checker Errors
+- Interface returns error
+- Orchestrator decides: fail-safe (allow) or fail-closed (deny)
+- Log error and record in metrics
 
-### Action Execution Errors
-- Action fails → log error and continue to execution
-- Critical action failure → `Failed` state
+### Action Executor Errors
+- Interface returns error
+- Orchestrator transitions to `Failed` state
+- Log error and record in metrics
 
 ## Performance Considerations
 

@@ -109,63 +109,65 @@ TestLifecycle_PreRun_Cancellation
 #### Constraint Checking Phase Tests
 ```go
 TestLifecycle_Constraints_NoConstraints
-- Job with no constraints defined
-- Should skip constraint checking
+- Job with no constraint config
+- Should skip constraint checking phase
 - Should go directly from Pending → ContainerCreating
 
 TestLifecycle_Constraints_AllPass
-- Job with maxConcurrentRuns=5, currently 2 running
-- Job with requirePreviousSuccess=true, previous succeeded
-- All constraints pass
+- Mock ConstraintChecker returns empty violations list
 - Should transition Pending → ConditionPending → ConditionRunning → ContainerCreating
+- Should record zero violations in metrics
 
-TestLifecycle_Constraints_OneViolated
-- Job with maxConcurrentRuns=2, currently 2 running
+TestLifecycle_Constraints_ViolationsReturned
+- Mock ConstraintChecker returns violations with Severity=Error
 - Should transition to ActionPending
-- Should have constraint violation recorded
+- Should pass violations to ActionExecutor
+- Should record violations count in metrics
 
-TestLifecycle_Constraints_MultipleViolated
-- Job with multiple violated constraints
-- Should record all violations
-- Should transition to ActionPending
-- Action should be based on first violation
+TestLifecycle_Constraints_WarningsOnly
+- Mock ConstraintChecker returns violations with Severity=Warning
+- Should log warnings
+- Should transition directly to ContainerCreating (no action needed)
+- Should record warnings in metrics
 
 TestLifecycle_Constraints_CheckError
-- Constraint check returns error (e.g., database unreachable)
-- Should handle gracefully
-- Should either fail-safe (allow) or fail-closed (deny) based on constraint
+- Mock ConstraintChecker returns error
+- Should handle gracefully (fail-safe or fail-closed based on config)
+- Should log error
+- Should record error in metrics
 ```
 
 #### Action Execution Phase Tests
 ```go
+TestLifecycle_Action_Proceed
+- Mock ActionExecutor returns ActionProceed
+- Should transition to ContainerCreating
+- Should continue to execution
+- Should record action in metrics
+
 TestLifecycle_Action_Skip
-- Constraint violated with action=skip
-- Should execute skip action
+- Mock ActionExecutor returns ActionSkip
 - Should transition to Completed
 - Should not create Kubernetes job
+- Should record action in metrics
 
-TestLifecycle_Action_KillOld
-- Constraint violated with action=killOld
-- Should cancel existing orchestrators for same job
-- Should transition to ContainerCreating
-- Should proceed with execution
+TestLifecycle_Action_Fail
+- Mock ActionExecutor returns ActionFail
+- Should transition to Failed
+- Should not create Kubernetes job
+- Should record action in metrics
 
-TestLifecycle_Action_Wait
-- Constraint violated with action=wait
-- Should wait for other instances to complete
-- Should transition to ContainerCreating
-- Should proceed when wait condition met
-
-TestLifecycle_Action_RetryLater
-- Constraint violated with action=retryLater
-- Should delay execution
+TestLifecycle_Action_Retry
+- Mock ActionExecutor returns ActionRetry
 - Should transition to Retrying
-- Should eventually retry
+- Should calculate retry delay
+- Should record action in metrics
 
 TestLifecycle_Action_ExecutionError
-- Action execution fails
-- Should record error
+- Mock ActionExecutor returns error
 - Should transition to Failed
+- Should log error
+- Should record error in metrics
 ```
 
 #### Execution Phase Tests
@@ -423,127 +425,7 @@ TestKubernetes_Cleanup_OrphanedJob
 - Job should remain running (handled by scheduler/operator)
 ```
 
-### 7. Constraint Checking Tests
-
-```go
-TestConstraint_MaxConcurrentRuns_NotViolated
-- MaxConcurrentRuns=5
-- Currently 3 instances running
-- Should pass constraint check
-
-TestConstraint_MaxConcurrentRuns_Violated
-- MaxConcurrentRuns=2
-- Currently 2 instances running
-- Should fail constraint check
-- Should record violation
-
-TestConstraint_RequirePreviousSuccess_Pass
-- Previous run succeeded
-- Should pass constraint check
-
-TestConstraint_RequirePreviousSuccess_Fail
-- Previous run failed
-- Should fail constraint check
-
-TestConstraint_RequirePreviousSuccess_NoPreviousRun
-- No previous run exists
-- Should handle based on configuration (fail-safe vs fail-closed)
-
-TestConstraint_CatchUp_WithinWindow
-- Missed run is within catchUpWindow
-- Should proceed with execution
-
-TestConstraint_CatchUp_OutsideWindow
-- Missed run is outside catchUpWindow
-- Should skip execution
-
-TestConstraint_MaxExpectedRunTime
-- Job runs for 10 seconds, expected max is 5 seconds
-- Should log warning but complete
-- Should record constraint violation for metrics
-
-TestConstraint_MaxAllowedRunTime
-- Job runs beyond maxAllowedRunTime
-- Should terminate job
-- Should transition to Failed
-
-TestConstraint_PreRunHook_Success
-- Execute pre-run webhook
-- Webhook returns 200
-- Should proceed to execution
-
-TestConstraint_PreRunHook_Failure
-- Execute pre-run webhook
-- Webhook returns 500
-- Should handle based on configuration (fail or proceed)
-
-TestConstraint_PostRunHook
-- Execute post-run webhook
-- Should not affect job outcome
-- Should log result
-
-TestConstraint_MultipleFailed
-- Multiple constraints violated simultaneously
-- Should record all violations
-- Should choose action based on priority
-```
-
-### 8. Action Execution Tests
-
-```go
-TestAction_Skip_Execution
-- Execute skip action
-- Should mark run as skipped
-- Should transition to Completed
-- Should not create Kubernetes job
-
-TestAction_KillOld_SingleInstance
-- One old instance running
-- Execute killOld action
-- Should cancel old orchestrator
-- Should verify old job deleted
-
-TestAction_KillOld_MultipleInstances
-- Three old instances running
-- Execute killOld action
-- Should cancel all old orchestrators
-- Should verify all jobs deleted
-
-TestAction_Wait_Timeout
-- Execute wait action
-- Other instances don't complete within timeout
-- Should timeout and fail
-- Should record timeout error
-
-TestAction_Wait_Success
-- Execute wait action
-- Other instances complete within timeout
-- Should proceed to execution
-
-TestAction_Webhook_Success
-- Execute webhook action
-- Webhook endpoint returns 200
-- Should record success
-
-TestAction_Webhook_Failure
-- Execute webhook action
-- Webhook endpoint returns 500
-- Should record failure
-- Should handle based on configuration (fail or continue)
-
-TestAction_TriggerJob_Success
-- Execute triggerJob action
-- Target job should be scheduled
-- Should verify job created
-
-TestAction_TriggerJob_JobNotFound
-- Execute triggerJob action
-- Target job doesn't exist
-- Should record error
-- Should handle gracefully
-```
-
-### 9. Metrics Collection Tests
+### 7. Metrics Collection Tests
 
 ```go
 TestMetrics_PhaseTimings
@@ -592,7 +474,7 @@ TestMetrics_Submission
 - Verify all fields populated correctly
 ```
 
-### 10. Error Handling Tests
+### 7. Error Handling Tests
 
 ```go
 TestError_DatabaseUnavailable
@@ -607,7 +489,7 @@ TestError_KubernetesAPIError
 - Should eventually fail if persistent
 
 TestError_NetworkTimeout
-- Webhook call times out
+- Action executor call times out
 - Should handle gracefully
 - Should record timeout
 
@@ -630,7 +512,7 @@ TestError_ResourceExhaustion
 - Should record error reason
 ```
 
-### 11. Integration Tests
+### 8. Integration Tests
 
 ```go
 TestIntegration_HappyPath
@@ -641,10 +523,10 @@ TestIntegration_HappyPath
 - Verify completion message sent
 
 TestIntegration_WithConstraints
-- Job with maxConcurrentRuns constraint
-- Multiple orchestrators running
-- Constraint violated, wait action executed
-- Eventually proceeds to execution
+- Job with mock constraint checker
+- Mock returns constraint violations
+- Mock action executor handles violations
+- Eventually proceeds to execution after action completes
 - Verify complete flow with metrics
 
 TestIntegration_WithRetry
@@ -656,7 +538,7 @@ TestIntegration_WithRetry
 
 TestIntegration_ConcurrentOrchestrators
 - Launch 10 orchestrators simultaneously
-- Some pass constraints, some wait
+- Some pass constraint checks, some require actions
 - All complete successfully
 - Verify no race conditions
 - Verify all metrics correct
@@ -674,7 +556,7 @@ TestIntegration_MultipleRetries
 - Verify metrics track all attempts
 ```
 
-### 12. Mock Tests (No Real Kubernetes)
+### 9. Mock Tests (No Real Kubernetes)
 
 ```go
 TestMock_FullLifecycle
@@ -693,8 +575,9 @@ TestMock_KubernetesClientErrors
 - Verify retry logic
 
 TestMock_ConstraintChecks
-- Mock database/scheduler responses
-- Test constraint checking logic in isolation
+- Mock ConstraintChecker interface
+- Test orchestrator's constraint checking phase in isolation
+- Verify correct state transitions based on constraint results
 ```
 
 ## Helper Functions
