@@ -1,4 +1,4 @@
-package scheduler
+package orchestrator
 
 import (
 	"errors"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/livinlefevreloca/itinerary/internal/scheduler"
 )
 
 // OrchestratorStatus represents the current state of an orchestrator
