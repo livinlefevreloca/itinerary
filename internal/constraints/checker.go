@@ -14,7 +14,6 @@ type DefaultConstraintChecker struct {
 	logger      *slog.Logger
 	// Dependencies for creating execution contexts
 	schedulerInbox MessageSender
-	webhookHandler WebhookSender
 	httpClient     *http.Client
 }
 
@@ -22,14 +21,12 @@ type DefaultConstraintChecker struct {
 func NewConstraintChecker(
 	constraints []ConstraintWithActions,
 	schedulerInbox MessageSender,
-	webhookHandler WebhookSender,
 	httpClient *http.Client,
 	logger *slog.Logger,
 ) *DefaultConstraintChecker {
 	return &DefaultConstraintChecker{
 		constraints:    constraints,
 		schedulerInbox: schedulerInbox,
-		webhookHandler: webhookHandler,
 		httpClient:     httpClient,
 		logger:         logger,
 	}
@@ -133,15 +130,14 @@ func (c *DefaultConstraintChecker) buildExecutionContext(
 	exitCode *int,
 ) *ExecutionContext {
 	return &ExecutionContext{
-		Job:             job,
-		RunID:           runID,
-		StartTime:       startTime,
-		EndTime:         endTime,
-		ExitCode:        exitCode,
-		SchedulerInbox:  c.schedulerInbox,
-		WebhookHandler:  c.webhookHandler,
-		HTTPClient:      c.httpClient,
-		Logger:          c.logger,
-		Context:         ctx,
+		Job:            job,
+		RunID:          runID,
+		StartTime:      startTime,
+		EndTime:        endTime,
+		ExitCode:       exitCode,
+		SchedulerInbox: c.schedulerInbox,
+		HTTPClient:     c.httpClient,
+		Logger:         c.logger,
+		Context:        ctx,
 	}
 }

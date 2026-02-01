@@ -68,31 +68,6 @@ func (m *MockSchedulerInbox) SetError(err error) {
 	m.errorToReturn = err
 }
 
-// MockWebhookHandler for testing webhooks
-type MockWebhookHandler struct {
-	calls []WebhookCall
-	err   error
-	mu    sync.Mutex
-}
-
-type WebhookCall struct {
-	URL     string
-	Payload interface{}
-}
-
-func (m *MockWebhookHandler) SendWebhook(url string, payload interface{}) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.calls = append(m.calls, WebhookCall{URL: url, Payload: payload})
-	return m.err
-}
-
-func (m *MockWebhookHandler) GetCalls() []WebhookCall {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]WebhookCall{}, m.calls...)
-}
-
 // TestLogger for capturing log output
 func createTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -100,16 +75,32 @@ func createTestLogger() *slog.Logger {
 	}))
 }
 
+// NoOpAction is a test action that does nothing
+type NoOpAction struct {
+	name string
+}
+
+func NewNoOpAction(name string) *NoOpAction {
+	return &NoOpAction{name: name}
+}
+
+func (n *NoOpAction) Execute(ctx *ExecutionContext) error {
+	return nil
+}
+
+func (n *NoOpAction) Name() string {
+	return n.name
+}
+
 // Helper to create ExecutionContext for tests
 func createTestExecutionContext() *ExecutionContext {
 	return &ExecutionContext{
-		Job:             &Job{ID: "test-job", Name: "test"},
-		RunID:           "test-run-id",
-		SchedulerInbox:  NewMockSchedulerInbox(),
-		WebhookHandler:  &MockWebhookHandler{},
-		HTTPClient:      &http.Client{Timeout: 5 * time.Second},
-		Logger:          createTestLogger(),
-		Context:         context.Background(),
+		Job:            &Job{ID: "test-job", Name: "test"},
+		RunID:          "test-run-id",
+		SchedulerInbox: NewMockSchedulerInbox(),
+		HTTPClient:     &http.Client{Timeout: 5 * time.Second},
+		Logger:         createTestLogger(),
+		Context:        context.Background(),
 	}
 }
 
@@ -1353,7 +1344,6 @@ func TestConstraintChecker_SingleConstraintMet(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1383,7 +1373,6 @@ func TestConstraintChecker_SingleConstraintViolated(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1420,7 +1409,6 @@ func TestConstraintChecker_MultipleConstraintsAllMet(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1457,7 +1445,6 @@ func TestConstraintChecker_MultipleConstraintsOneFails(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1478,7 +1465,6 @@ func TestConstraintChecker_NoConstraints(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1511,7 +1497,6 @@ func TestConstraintChecker_MultipleActionsOnViolation(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1549,7 +1534,6 @@ func TestConstraintChecker_ShouldRecheckOnRetry_True(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1574,7 +1558,6 @@ func TestConstraintChecker_ShouldRecheckOnRetry_False(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1590,7 +1573,6 @@ func TestConstraintChecker_ShouldRecheckOnRetry_NoConstraints(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1623,7 +1605,6 @@ func TestConstraintChecker_CheckPreExecution_OnlyRunsPrePhase(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1664,7 +1645,6 @@ func TestConstraintChecker_CheckDuringExecution_OnlyRunsDuringPhase(t *testing.T
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1706,7 +1686,6 @@ func TestConstraintChecker_CheckPostExecution_OnlyRunsPostPhase(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1738,7 +1717,6 @@ func TestConstraintChecker_CheckDuringExecution_RequiresStartTime(t *testing.T) 
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1766,7 +1744,6 @@ func TestConstraintChecker_CheckPostExecution_RequiresTiming(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1796,7 +1773,6 @@ func TestConstraintChecker_MultiplePhaseConstraint(t *testing.T) {
 	checker := NewConstraintChecker(
 		constraints,
 		NewMockSchedulerInbox(),
-		&MockWebhookHandler{},
 		&http.Client{},
 		createTestLogger(),
 	)
@@ -1882,9 +1858,6 @@ func TestExecutionContext_CreatedWithDependencies(t *testing.T) {
 	if ctx.SchedulerInbox == nil {
 		t.Error("Expected SchedulerInbox to be set")
 	}
-	if ctx.WebhookHandler == nil {
-		t.Error("Expected WebhookHandler to be set")
-	}
 	if ctx.HTTPClient == nil {
 		t.Error("Expected HTTPClient to be set")
 	}
@@ -1897,8 +1870,8 @@ func TestExecutionContext_SchedulerInboxUsed(t *testing.T) {
 	t.Skip("Constraint using scheduler inbox not yet implemented")
 }
 
-func TestExecutionContext_WebhookHandlerUsed(t *testing.T) {
-	t.Skip("WebhookAction not yet implemented")
+func TestExecutionContext_HTTPClientUsed(t *testing.T) {
+	t.Skip("HTTPClient usage already tested via HTTPHealthCheckConstraint tests")
 }
 
 func TestExecutionContext_LoggerUsed(t *testing.T) {

@@ -123,9 +123,6 @@ type ExecutionContext struct {
     // HTTP client for making external requests
     HTTPClient *http.Client
 
-    // Webhook handler for sending notifications
-    WebhookHandler WebhookSender
-
     // Logging
     Logger *slog.Logger
 
@@ -135,10 +132,6 @@ type ExecutionContext struct {
 
 type MessageSender interface {
     Send(msg interface{}) error
-}
-
-type WebhookSender interface {
-    SendWebhook(url string, payload interface{}) error
 }
 ```
 

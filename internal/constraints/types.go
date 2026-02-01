@@ -63,9 +63,6 @@ type ExecutionContext struct {
 	// HTTP client for making external requests
 	HTTPClient *http.Client
 
-	// Webhook handler for sending notifications
-	WebhookHandler WebhookSender
-
 	// Logging
 	Logger *slog.Logger
 
@@ -76,11 +73,6 @@ type ExecutionContext struct {
 // MessageSender sends messages to the scheduler
 type MessageSender interface {
 	Send(msg interface{}) error
-}
-
-// WebhookSender sends webhook notifications
-type WebhookSender interface {
-	SendWebhook(url string, payload interface{}) error
 }
 
 // Job represents a job definition (simplified for constraints module)

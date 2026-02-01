@@ -780,7 +780,6 @@ Tests are organized into the following categories:
 - Assert RunID is set
 - Assert Logger is set
 - Assert SchedulerInbox is set
-- Assert WebhookHandler is set
 - Assert HTTPClient is set
 - Assert Context is set
 
@@ -796,11 +795,10 @@ Tests are organized into the following categories:
 - Execute constraint with context
 - Verify SchedulerInbox.Send() was called
 
-**TestExecutionContext_WebhookHandlerUsed**
-- Create mock webhook handler
-- Create WebhookAction
-- Execute action with context
-- Verify handler.SendWebhook() was called
+**TestExecutionContext_HTTPClientUsed**
+- Create HTTPHealthCheckConstraint
+- Execute constraint with context
+- Verify HTTPClient was used to make request
 
 **TestExecutionContext_LoggerUsed**
 - Create test logger
@@ -893,31 +891,6 @@ func (m *MockSchedulerInbox) GetMessages() []interface{} {
     return m.messages
 }
 
-// MockWebhookHandler for testing webhooks
-type MockWebhookHandler struct {
-    calls []WebhookCall
-    err   error
-    mu    sync.Mutex
-}
-
-type WebhookCall struct {
-    URL     string
-    Payload interface{}
-}
-
-func (m *MockWebhookHandler) SendWebhook(url string, payload interface{}) error {
-    m.mu.Lock()
-    defer m.mu.Unlock()
-    m.calls = append(m.calls, WebhookCall{URL: url, Payload: payload})
-    return m.err
-}
-
-func (m *MockWebhookHandler) GetCalls() []WebhookCall {
-    m.mu.Lock()
-    defer m.mu.Unlock()
-    return m.calls
-}
-
 // TestLogger for capturing log output
 func createTestLogger() *slog.Logger {
     return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -928,13 +901,12 @@ func createTestLogger() *slog.Logger {
 // Helper to create ExecutionContext for tests
 func createTestExecutionContext() *ExecutionContext {
     return &ExecutionContext{
-        Job:             &Job{ID: "test-job", Name: "test"},
-        RunID:           "test-run-id",
-        SchedulerInbox:  &MockSchedulerInbox{},
-        WebhookHandler:  &MockWebhookHandler{},
-        HTTPClient:      &http.Client{Timeout: 5 * time.Second},
-        Logger:          createTestLogger(),
-        Context:         context.Background(),
+        Job:            &Job{ID: "test-job", Name: "test"},
+        RunID:          "test-run-id",
+        SchedulerInbox: &MockSchedulerInbox{},
+        HTTPClient:     &http.Client{Timeout: 5 * time.Second},
+        Logger:         createTestLogger(),
+        Context:        context.Background(),
     }
 }
 
