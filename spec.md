@@ -21,6 +21,12 @@ itinerary/
 │       └── main.go          # Server/CLI entry point
 │
 ├── internal/                # Private application packages
+│   ├── actions/            # Action execution (webhooks, retries, etc.)
+│   │   └── spec.md              # Component specification
+│   ├── config/             # Configuration management
+│   ├── constraints/        # Constraint evaluation system
+│   │   ├── spec.md              # Component specification
+│   │   └── test_spec.md         # Test specification
 │   ├── cron/               # Cron expression parser
 │   │   ├── spec.md              # Component specification
 │   │   └── test_spec.md         # Test specification
@@ -28,6 +34,9 @@ itinerary/
 │   │   ├── spec.md              # Component specification
 │   │   └── test_spec.md         # Test specification
 │   ├── inbox/              # Generic inbox for component communication
+│   ├── orchestrator/       # Job run lifecycle management
+│   │   ├── spec.md              # Component specification
+│   │   └── test_spec.md         # Test specification
 │   ├── scheduler/          # Central scheduler component
 │   │   ├── spec.md              # Component specification
 │   │   ├── test_spec.md         # Test specification
@@ -37,8 +46,6 @@ itinerary/
 │   ├── stats/              # Stats collector component
 │   │   ├── spec.md              # Component specification
 │   │   └── test_spec.md         # Test specification
-│   ├── syncer/             # Database syncer component
-│   │   └── spec.md              # Component specification
 │   └── testutil/           # Shared test utilities and mocks
 │
 ├── tools/                  # Standalone tools
