@@ -155,6 +155,7 @@ func setupTestDB(t *testing.T) *db.DB {
 			status TEXT NOT NULL,
 			success BOOLEAN,
 			error TEXT,
+			trigger TEXT NOT NULL,
 			FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 		);
 
@@ -731,6 +732,7 @@ func TestDatabaseWrite_OrchestratorStats(t *testing.T) {
 			RunID:       runID,
 			ScheduledAt: scheduledAt,
 			Status:      "completed",
+			Trigger:     "scheduled",
 		}
 		if err := database.CreateJobRun(jobRun); err != nil {
 			t.Fatalf("failed to create job run %s: %v", runID, err)
