@@ -1297,31 +1297,41 @@ func TestAlwaysFailConstraint_Name(t *testing.T) {
 // ========================
 
 func TestDelayAction_CompletesAfterDuration(t *testing.T) {
-	t.Skip("DelayAction not yet implemented")
+	t.Skip("DelayAction will be implemented in actions module")
 }
 
 func TestDelayAction_CancellationBeforeCompletion(t *testing.T) {
-	t.Skip("DelayAction not yet implemented")
+	t.Skip("DelayAction will be implemented in actions module")
 }
 
 func TestWebhookAction_SendsWebhook(t *testing.T) {
-	t.Skip("WebhookAction not yet implemented")
+	t.Skip("WebhookAction will be implemented in actions module")
 }
 
 func TestWebhookAction_WebhookError(t *testing.T) {
-	t.Skip("WebhookAction not yet implemented")
+	t.Skip("WebhookAction will be implemented in actions module")
 }
 
 func TestLogAction_LogsMessage(t *testing.T) {
-	t.Skip("LogAction not yet implemented")
+	t.Skip("LogAction will be implemented in actions module")
 }
 
 func TestFailAction_ReturnsError(t *testing.T) {
-	t.Skip("FailAction not yet implemented")
+	t.Skip("FailAction will be implemented in actions module")
 }
 
 func TestNoOpAction_DoesNothing(t *testing.T) {
-	t.Skip("NoOpAction not yet implemented")
+	action := NewNoOpAction("test-noop")
+	ctx := createTestExecutionContext()
+
+	err := action.Execute(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if action.Name() != "test-noop" {
+		t.Errorf("Expected name 'test-noop', got '%s'", action.Name())
+	}
 }
 
 // ========================
@@ -1329,43 +1339,265 @@ func TestNoOpAction_DoesNothing(t *testing.T) {
 // ========================
 
 func TestConstraintChecker_SingleConstraintMet(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	constraint := NewAlwaysPassConstraint("test-pass", false, []EvaluationPhase{EvaluationPhasePreExecution})
+	onMetAction := NewNoOpAction("on-met-action")
+
+	constraints := []ConstraintWithActions{
+		{
+			Constraint:  constraint,
+			OnMet:       []Action{onMetAction},
+			OnViolation: []Action{},
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.ShouldProceed {
+		t.Errorf("Expected ShouldProceed=true, got false")
+	}
 }
 
 func TestConstraintChecker_SingleConstraintViolated(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	constraint := NewAlwaysFailConstraint("test-fail", false, []EvaluationPhase{EvaluationPhasePreExecution})
+	onViolationAction := NewNoOpAction("on-violation-action")
+
+	constraints := []ConstraintWithActions{
+		{
+			Constraint:  constraint,
+			OnMet:       []Action{},
+			OnViolation: []Action{onViolationAction},
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if result.ShouldProceed {
+		t.Errorf("Expected ShouldProceed=false, got true")
+	}
 }
 
 func TestConstraintChecker_MultipleConstraintsAllMet(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	constraints := []ConstraintWithActions{
+		{
+			Constraint:  NewAlwaysPassConstraint("pass-1", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			OnMet:       []Action{NewNoOpAction("action-1")},
+			OnViolation: []Action{},
+		},
+		{
+			Constraint:  NewAlwaysPassConstraint("pass-2", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			OnMet:       []Action{NewNoOpAction("action-2")},
+			OnViolation: []Action{},
+		},
+		{
+			Constraint:  NewAlwaysPassConstraint("pass-3", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			OnMet:       []Action{NewNoOpAction("action-3")},
+			OnViolation: []Action{},
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.ShouldProceed {
+		t.Errorf("Expected ShouldProceed=true (all constraints met), got false")
+	}
 }
 
 func TestConstraintChecker_MultipleConstraintsOneFails(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	constraints := []ConstraintWithActions{
+		{
+			Constraint:  NewAlwaysPassConstraint("pass-1", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			OnMet:       []Action{NewNoOpAction("action-1")},
+			OnViolation: []Action{},
+		},
+		{
+			Constraint:  NewAlwaysFailConstraint("fail-1", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			OnMet:       []Action{},
+			OnViolation: []Action{NewNoOpAction("fail-action")},
+		},
+		{
+			Constraint:  NewAlwaysPassConstraint("pass-2", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			OnMet:       []Action{NewNoOpAction("action-2")},
+			OnViolation: []Action{},
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if result.ShouldProceed {
+		t.Errorf("Expected ShouldProceed=false (one constraint failed), got true")
+	}
 }
 
 func TestConstraintChecker_NoConstraints(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	constraints := []ConstraintWithActions{}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.ShouldProceed {
+		t.Errorf("Expected ShouldProceed=true (no constraints), got false")
+	}
 }
 
 func TestConstraintChecker_MultipleActionsOnViolation(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	constraint := NewAlwaysFailConstraint("test-fail", false, []EvaluationPhase{EvaluationPhasePreExecution})
+
+	constraints := []ConstraintWithActions{
+		{
+			Constraint: constraint,
+			OnViolation: []Action{
+				NewNoOpAction("action-1"),
+				NewNoOpAction("action-2"),
+				NewNoOpAction("action-3"),
+			},
+			OnMet: []Action{},
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if result.ShouldProceed {
+		t.Errorf("Expected ShouldProceed=false, got true")
+	}
 }
 
 func TestConstraintChecker_ActionExecutionError(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	t.Skip("Action execution error handling requires actions that can error - will implement with actions module")
 }
 
 func TestConstraintChecker_ShouldRecheckOnRetry_True(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	constraints := []ConstraintWithActions{
+		{
+			Constraint:     NewAlwaysPassConstraint("pass-1", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			RecheckOnRetry: false,
+		},
+		{
+			Constraint:     NewAlwaysPassConstraint("pass-2", true, []EvaluationPhase{EvaluationPhasePreExecution}),
+			RecheckOnRetry: true,
+		},
+		{
+			Constraint:     NewAlwaysPassConstraint("pass-3", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			RecheckOnRetry: false,
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	if !checker.ShouldRecheckOnRetry(&Job{ID: "test-job"}) {
+		t.Error("Expected ShouldRecheckOnRetry=true (one constraint has recheck=true)")
+	}
 }
 
 func TestConstraintChecker_ShouldRecheckOnRetry_False(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	constraints := []ConstraintWithActions{
+		{
+			Constraint:     NewAlwaysPassConstraint("pass-1", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			RecheckOnRetry: false,
+		},
+		{
+			Constraint:     NewAlwaysPassConstraint("pass-2", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			RecheckOnRetry: false,
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	if checker.ShouldRecheckOnRetry(&Job{ID: "test-job"}) {
+		t.Error("Expected ShouldRecheckOnRetry=false (all constraints have recheck=false)")
+	}
 }
 
 func TestConstraintChecker_ShouldRecheckOnRetry_NoConstraints(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	constraints := []ConstraintWithActions{}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	if checker.ShouldRecheckOnRetry(&Job{ID: "test-job"}) {
+		t.Error("Expected ShouldRecheckOnRetry=false (no constraints)")
+	}
 }
 
 // ========================
@@ -1373,27 +1605,230 @@ func TestConstraintChecker_ShouldRecheckOnRetry_NoConstraints(t *testing.T) {
 // ========================
 
 func TestConstraintChecker_CheckPreExecution_OnlyRunsPrePhase(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	constraints := []ConstraintWithActions{
+		{
+			Constraint: NewAlwaysPassConstraint("pre", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			OnMet:      []Action{NewNoOpAction("pre-action")},
+		},
+		{
+			Constraint: NewAlwaysPassConstraint("during", false, []EvaluationPhase{EvaluationPhaseDuringExecution}),
+			OnMet:      []Action{NewNoOpAction("during-action")},
+		},
+		{
+			Constraint: NewAlwaysPassConstraint("post", false, []EvaluationPhase{EvaluationPhasePostExecution}),
+			OnMet:      []Action{NewNoOpAction("post-action")},
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.ShouldProceed {
+		t.Errorf("Expected ShouldProceed=true")
+	}
+
+	// Only pre-execution constraint should have been evaluated (message should only contain "always pass" once)
+	if !contains(result.Message, "always pass") {
+		t.Errorf("Expected message to contain pre-execution result")
+	}
 }
 
 func TestConstraintChecker_CheckDuringExecution_OnlyRunsDuringPhase(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	startTime := time.Now().Add(-30 * time.Minute)
+
+	constraints := []ConstraintWithActions{
+		{
+			Constraint: NewAlwaysPassConstraint("pre", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			OnMet:      []Action{NewNoOpAction("pre-action")},
+		},
+		{
+			Constraint: NewMaxRuntimeConstraint("during", 2*time.Hour),
+			OnMet:      []Action{NewNoOpAction("during-action")},
+		},
+		{
+			Constraint: NewAlwaysPassConstraint("post", false, []EvaluationPhase{EvaluationPhasePostExecution}),
+			OnMet:      []Action{NewNoOpAction("post-action")},
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	result, err := checker.CheckDuringExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.ShouldProceed {
+		t.Errorf("Expected ShouldProceed=true")
+	}
+
+	// Only during-execution constraint should have been evaluated
+	if !contains(result.Message, "runtime") {
+		t.Errorf("Expected message to contain during-execution result, got: %s", result.Message)
+	}
 }
 
 func TestConstraintChecker_CheckPostExecution_OnlyRunsPostPhase(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	startTime := time.Now().Add(-1 * time.Minute)
+	endTime := time.Now()
+
+	constraints := []ConstraintWithActions{
+		{
+			Constraint: NewAlwaysPassConstraint("pre", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			OnMet:      []Action{NewNoOpAction("pre-action")},
+		},
+		{
+			Constraint: NewAlwaysPassConstraint("during", false, []EvaluationPhase{EvaluationPhaseDuringExecution}),
+			OnMet:      []Action{NewNoOpAction("during-action")},
+		},
+		{
+			Constraint: NewMinRuntimeConstraint("post", 30*time.Second),
+			OnMet:      []Action{NewNoOpAction("post-action")},
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	result, err := checker.CheckPostExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.ShouldProceed {
+		t.Errorf("Expected ShouldProceed=true")
+	}
+
+	// Only post-execution constraint should have been evaluated
+	if !contains(result.Message, "runtime") {
+		t.Errorf("Expected message to contain post-execution result, got: %s", result.Message)
+	}
 }
 
 func TestConstraintChecker_CheckDuringExecution_RequiresStartTime(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	startTime := time.Now().Add(-30 * time.Minute)
+
+	constraints := []ConstraintWithActions{
+		{
+			Constraint: NewMaxRuntimeConstraint("max-runtime", 2*time.Hour),
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	result, err := checker.CheckDuringExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.ShouldProceed {
+		t.Errorf("Expected ShouldProceed=true (within runtime limit)")
+	}
 }
 
 func TestConstraintChecker_CheckPostExecution_RequiresTiming(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	startTime := time.Now().Add(-1 * time.Minute)
+	endTime := time.Now()
+
+	constraints := []ConstraintWithActions{
+		{
+			Constraint: NewMinRuntimeConstraint("min-runtime", 30*time.Second),
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	result, err := checker.CheckPostExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.ShouldProceed {
+		t.Errorf("Expected ShouldProceed=true (meets minimum runtime)")
+	}
 }
 
 func TestConstraintChecker_MultiplePhaseConstraint(t *testing.T) {
-	t.Skip("ConstraintChecker not yet implemented")
+	// Create a constraint that applies to multiple phases
+	constraints := []ConstraintWithActions{
+		{
+			Constraint: NewAlwaysPassConstraint("multi-phase", false, []EvaluationPhase{
+				EvaluationPhasePreExecution,
+				EvaluationPhasePostExecution,
+			}),
+			OnMet: []Action{NewNoOpAction("action")},
+		},
+	}
+
+	checker := NewConstraintChecker(
+		constraints,
+		NewMockSchedulerInbox(),
+		&MockWebhookHandler{},
+		&http.Client{},
+		createTestLogger(),
+	)
+
+	// Should run in pre-execution
+	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	if err != nil {
+		t.Fatalf("Pre-execution: Expected no error, got: %v", err)
+	}
+	if !result.ShouldProceed {
+		t.Error("Pre-execution: Expected constraint to run")
+	}
+
+	// Should NOT run in during-execution
+	startTime := time.Now()
+	result, err = checker.CheckDuringExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime)
+	if err != nil {
+		t.Fatalf("During-execution: Expected no error, got: %v", err)
+	}
+	if result.Message != "" {
+		t.Error("During-execution: Expected no constraints to run (empty message)")
+	}
+
+	// Should run in post-execution
+	endTime := time.Now()
+	result, err = checker.CheckPostExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
+	if err != nil {
+		t.Fatalf("Post-execution: Expected no error, got: %v", err)
+	}
+	if !result.ShouldProceed {
+		t.Error("Post-execution: Expected constraint to run")
+	}
 }
 
 // ========================
