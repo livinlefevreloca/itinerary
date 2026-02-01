@@ -77,6 +77,7 @@ func MakeTestJobRun(jobID string, scheduledAt time.Time) *JobRun {
 		RunID:       "run-" + jobID + "-" + scheduledAt.Format("20060102150405"),
 		ScheduledAt: scheduledAt,
 		Status:      "pending",
+		Trigger:     "scheduled",
 	}
 }
 
@@ -826,149 +827,175 @@ func TestIsForeignKey(t *testing.T) {
 	}
 }
 
-// Constraint Violation Tests
+// Constraint Run Tests
 
-func TestCreateConstraintViolation(t *testing.T) {
+func TestCreateConstraintRun(t *testing.T) {
 	db := NewTestDB(t)
 	SeedTestData(t, db)
 
-	// Constraint types are pre-seeded in schema
+	// Create a constraint for the job
+	constraint := &Constraint{
+		ID:               "constraint-1",
+		JobID:            "job-1",
+		ConstraintTypeID: 7, // maxAllowedRunTime
+		Config:           stringPtr(`{"value": "2h"}`),
+	}
+	if err := db.CreateConstraint(constraint); err != nil {
+		t.Fatalf("CreateConstraint failed: %v", err)
+	}
+
 	run := MakeTestJobRun("job-1", time.Now())
 	if err := db.CreateJobRun(run); err != nil {
 		t.Fatalf("CreateJobRun failed: %v", err)
 	}
 
 	details := `{"message": "Job exceeded maxAllowedRunTime", "threshold": "2h"}`
-	violation := &ConstraintViolation{
-		ID:               "violation-1",
-		RunID:            run.RunID,
-		ConstraintTypeID: 7, // maxAllowedRunTime
-		ViolationTime:    time.Now(),
-		Details:          &details,
+	constraintRun := &ConstraintRun{
+		ID:           "constraint-run-1",
+		RunID:        run.RunID,
+		ConstraintID: constraint.ID,
+		ExecutedAt:   time.Now(),
+		Success:      true,
+		Violated:     true,
+		InError:      false,
+		Details:      &details,
 	}
 
-	if err := db.CreateConstraintViolation(violation); err != nil {
-		t.Fatalf("CreateConstraintViolation failed: %v", err)
+	if err := db.CreateConstraintRun(constraintRun); err != nil {
+		t.Fatalf("CreateConstraintRun failed: %v", err)
 	}
 }
 
-func TestGetConstraintViolations(t *testing.T) {
+func TestGetConstraintRuns(t *testing.T) {
 	db := NewTestDB(t)
 	SeedTestData(t, db)
 
-	// Constraint types are pre-seeded in schema
+	// Create constraints
+	constraint1 := &Constraint{
+		ID:               "constraint-1",
+		JobID:            "job-1",
+		ConstraintTypeID: 6, // maxExpectedRunTime
+		Config:           stringPtr(`{"value": "1h"}`),
+	}
+	constraint2 := &Constraint{
+		ID:               "constraint-2",
+		JobID:            "job-1",
+		ConstraintTypeID: 7, // maxAllowedRunTime
+		Config:           stringPtr(`{"value": "2h"}`),
+	}
+	db.CreateConstraint(constraint1)
+	db.CreateConstraint(constraint2)
+
 	run := MakeTestJobRun("job-1", time.Now())
 	if err := db.CreateJobRun(run); err != nil {
 		t.Fatalf("CreateJobRun failed: %v", err)
 	}
 
-	// Create multiple violations
+	// Create multiple constraint runs
 	details1 := `{"message": "Job exceeded maxExpectedRunTime"}`
 	details2 := `{"message": "Job exceeded maxAllowedRunTime"}`
-	violation1 := &ConstraintViolation{
-		ID:               "violation-1",
-		RunID:            run.RunID,
-		ConstraintTypeID: 6, // maxExpectedRunTime
-		ViolationTime:    time.Now(),
-		Details:          &details1,
+	constraintRun1 := &ConstraintRun{
+		ID:           "constraint-run-1",
+		RunID:        run.RunID,
+		ConstraintID: constraint1.ID,
+		ExecutedAt:   time.Now(),
+		Success:      true,
+		Violated:     true,
+		InError:      false,
+		Details:      &details1,
 	}
-	violation2 := &ConstraintViolation{
-		ID:               "violation-2",
-		RunID:            run.RunID,
-		ConstraintTypeID: 7, // maxAllowedRunTime
-		ViolationTime:    time.Now().Add(time.Minute),
-		Details:          &details2,
+	constraintRun2 := &ConstraintRun{
+		ID:           "constraint-run-2",
+		RunID:        run.RunID,
+		ConstraintID: constraint2.ID,
+		ExecutedAt:   time.Now().Add(time.Minute),
+		Success:      true,
+		Violated:     true,
+		InError:      false,
+		Details:      &details2,
 	}
 
-	if err := db.CreateConstraintViolation(violation1); err != nil {
-		t.Fatalf("CreateConstraintViolation failed: %v", err)
+	if err := db.CreateConstraintRun(constraintRun1); err != nil {
+		t.Fatalf("CreateConstraintRun failed: %v", err)
 	}
-	if err := db.CreateConstraintViolation(violation2); err != nil {
-		t.Fatalf("CreateConstraintViolation failed: %v", err)
+	if err := db.CreateConstraintRun(constraintRun2); err != nil {
+		t.Fatalf("CreateConstraintRun failed: %v", err)
 	}
 
-	// Retrieve all violations for the run
-	violations, err := db.GetConstraintViolations(run.RunID)
+	// Retrieve all constraint runs for the job run
+	constraintRuns, err := db.GetConstraintRuns(run.RunID)
 	if err != nil {
-		t.Fatalf("GetConstraintViolations failed: %v", err)
+		t.Fatalf("GetConstraintRuns failed: %v", err)
 	}
 
-	if len(violations) != 2 {
-		t.Errorf("got %d violations, want 2", len(violations))
+	if len(constraintRuns) != 2 {
+		t.Errorf("got %d constraint runs, want 2", len(constraintRuns))
 	}
 }
 
-func TestGetConstraintViolationsByType(t *testing.T) {
+func TestGetConstraintRunsByConstraint(t *testing.T) {
 	db := NewTestDB(t)
 	SeedTestData(t, db)
 
-	// Constraint types are pre-seeded in schema
+	// Create constraint
+	constraint := &Constraint{
+		ID:               "constraint-1",
+		JobID:            "job-1",
+		ConstraintTypeID: 7, // maxAllowedRunTime
+		Config:           stringPtr(`{"value": "2h"}`),
+	}
+	db.CreateConstraint(constraint)
+
 	run1 := MakeTestJobRun("job-1", time.Now())
 	run2 := MakeTestJobRun("job-1", time.Now().Add(time.Hour))
 	db.CreateJobRun(run1)
 	db.CreateJobRun(run2)
 
 	details := `{"message": "Job exceeded maxAllowedRunTime"}`
-	violation1 := &ConstraintViolation{
-		ID:               "violation-1",
-		RunID:            run1.RunID,
-		ConstraintTypeID: 7, // maxAllowedRunTime
-		ViolationTime:    time.Now(),
-		Details:          &details,
+	constraintRun1 := &ConstraintRun{
+		ID:           "constraint-run-1",
+		RunID:        run1.RunID,
+		ConstraintID: constraint.ID,
+		ExecutedAt:   time.Now(),
+		Success:      true,
+		Violated:     true,
+		InError:      false,
+		Details:      &details,
 	}
-	violation2 := &ConstraintViolation{
-		ID:               "violation-2",
-		RunID:            run2.RunID,
-		ConstraintTypeID: 7, // maxAllowedRunTime
-		ViolationTime:    time.Now().Add(time.Hour),
-		Details:          &details,
+	constraintRun2 := &ConstraintRun{
+		ID:           "constraint-run-2",
+		RunID:        run2.RunID,
+		ConstraintID: constraint.ID,
+		ExecutedAt:   time.Now().Add(time.Hour),
+		Success:      true,
+		Violated:     true,
+		InError:      false,
+		Details:      &details,
 	}
 
-	db.CreateConstraintViolation(violation1)
-	db.CreateConstraintViolation(violation2)
+	db.CreateConstraintRun(constraintRun1)
+	db.CreateConstraintRun(constraintRun2)
 
-	// Retrieve violations for specific constraint type
-	violations, err := db.GetConstraintViolationsByType(7, 10) // maxAllowedRunTime
+	// Retrieve constraint runs for specific constraint
+	constraintRuns, err := db.GetConstraintRunsByConstraint(constraint.ID, 10)
 	if err != nil {
-		t.Fatalf("GetConstraintViolationsByType failed: %v", err)
+		t.Fatalf("GetConstraintRunsByConstraint failed: %v", err)
 	}
 
-	if len(violations) != 2 {
-		t.Errorf("got %d violations, want 2", len(violations))
+	if len(constraintRuns) != 2 {
+		t.Errorf("got %d constraint runs, want 2", len(constraintRuns))
 	}
 
-	for _, v := range violations {
-		if v.ConstraintTypeID != 7 {
-			t.Errorf("ConstraintTypeID = %d, want %d", v.ConstraintTypeID, 7)
+	for _, cr := range constraintRuns {
+		if cr.ConstraintID != constraint.ID {
+			t.Errorf("ConstraintID = %s, want %s", cr.ConstraintID, constraint.ID)
 		}
 	}
 }
 
-func TestJobWithConstraints(t *testing.T) {
-	db := NewTestDB(t)
-
-	// Create a job with constraints (stored as JSON)
-	constraints := `{"1": {"value": 5}, "6": {"value": "1h"}, "7": {"value": "2h"}}`
-	job := &Job{
-		ID:          "job-with-constraints",
-		Name:        "Test Job with Constraints",
-		Schedule:    "0 * * * *",
-		PodSpec:     `{"image": "test:latest"}`,
-		Constraints: &constraints,
-	}
-
-	if err := db.CreateJob(job); err != nil {
-		t.Fatalf("CreateJob failed: %v", err)
-	}
-
-	retrieved, err := db.GetJob("job-with-constraints")
-	if err != nil {
-		t.Fatalf("GetJob failed: %v", err)
-	}
-
-	if retrieved.Constraints == nil || *retrieved.Constraints != constraints {
-		t.Errorf("Constraints = %v, want %s", retrieved.Constraints, constraints)
-	}
+// Helper function for string pointer
+func stringPtr(s string) *string {
+	return &s
 }
 
 // Statistics Tests

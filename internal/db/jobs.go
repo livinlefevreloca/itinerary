@@ -16,11 +16,11 @@ func (db *DB) CreateJob(job *Job) error {
 	job.UpdatedAt = now
 
 	query := `
-		INSERT INTO jobs (id, name, schedule, pod_spec, constraints, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO jobs (id, name, schedule, pod_spec, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 	`
 
-	_, err := db.Exec(query, job.ID, job.Name, job.Schedule, job.PodSpec, job.Constraints, job.CreatedAt, job.UpdatedAt)
+	_, err := db.Exec(query, job.ID, job.Name, job.Schedule, job.PodSpec, job.CreatedAt, job.UpdatedAt)
 	return err
 }
 
@@ -31,11 +31,11 @@ func (tx *Tx) CreateJob(job *Job) error {
 	job.UpdatedAt = now
 
 	query := `
-		INSERT INTO jobs (id, name, schedule, pod_spec, constraints, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO jobs (id, name, schedule, pod_spec, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 	`
 
-	_, err := tx.Exec(query, job.ID, job.Name, job.Schedule, job.PodSpec, job.Constraints, job.CreatedAt, job.UpdatedAt)
+	_, err := tx.Exec(query, job.ID, job.Name, job.Schedule, job.PodSpec, job.CreatedAt, job.UpdatedAt)
 	return err
 }
 
@@ -44,7 +44,7 @@ func (db *DB) GetJob(id string) (*Job, error) {
 	job := &Job{}
 
 	query := `
-		SELECT id, name, schedule, pod_spec, constraints, created_at, updated_at
+		SELECT id, name, schedule, pod_spec, created_at, updated_at
 		FROM jobs
 		WHERE id = ?
 	`
@@ -54,7 +54,6 @@ func (db *DB) GetJob(id string) (*Job, error) {
 		&job.Name,
 		&job.Schedule,
 		&job.PodSpec,
-		&job.Constraints,
 		&job.CreatedAt,
 		&job.UpdatedAt,
 	)
@@ -73,7 +72,7 @@ func (db *DB) GetJob(id string) (*Job, error) {
 // GetAllJobs retrieves all jobs
 func (db *DB) GetAllJobs() ([]Job, error) {
 	query := `
-		SELECT id, name, schedule, pod_spec, constraints, created_at, updated_at
+		SELECT id, name, schedule, pod_spec, created_at, updated_at
 		FROM jobs
 		ORDER BY created_at DESC
 	`
@@ -92,7 +91,6 @@ func (db *DB) GetAllJobs() ([]Job, error) {
 			&job.Name,
 			&job.Schedule,
 			&job.PodSpec,
-			&job.Constraints,
 			&job.CreatedAt,
 			&job.UpdatedAt,
 		)
@@ -120,11 +118,11 @@ func (db *DB) UpdateJob(job *Job) error {
 
 	query := `
 		UPDATE jobs
-		SET name = ?, schedule = ?, pod_spec = ?, constraints = ?, updated_at = ?
+		SET name = ?, schedule = ?, pod_spec = ?, updated_at = ?
 		WHERE id = ?
 	`
 
-	result, err := db.Exec(query, job.Name, job.Schedule, job.PodSpec, job.Constraints, job.UpdatedAt, job.ID)
+	result, err := db.Exec(query, job.Name, job.Schedule, job.PodSpec, job.UpdatedAt, job.ID)
 	if err != nil {
 		return err
 	}
@@ -267,34 +265,61 @@ func (db *DB) GetAllActionTypes() ([]ActionType, error) {
 }
 
 // =============================================================================
-// Job Action Operations
+// Constraint Operations
 // =============================================================================
 
-// CreateJobAction creates a new job action
-func (db *DB) CreateJobAction(jobAction *JobAction) error {
+// CreateConstraint creates a new constraint for a job
+func (db *DB) CreateConstraint(constraint *Constraint) error {
+	now := time.Now()
+	constraint.CreatedAt = now
+
 	query := `
-		INSERT INTO job_actions (id, job_id, action_type_id, trigger, constraint_type_id, config)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO constraints (id, job_id, constraint_type_id, config, created_at)
+		VALUES (?, ?, ?, ?, ?)
 	`
 
 	_, err := db.Exec(query,
-		jobAction.ID,
-		jobAction.JobID,
-		jobAction.ActionTypeID,
-		jobAction.Trigger,
-		jobAction.ConstraintTypeID,
-		jobAction.Config,
+		constraint.ID,
+		constraint.JobID,
+		constraint.ConstraintTypeID,
+		constraint.Config,
+		constraint.CreatedAt,
 	)
 	return err
 }
 
-// GetJobActions retrieves all actions for a job
-func (db *DB) GetJobActions(jobID string) ([]JobAction, error) {
+// GetConstraint retrieves a constraint by ID
+func (db *DB) GetConstraint(id string) (*Constraint, error) {
+	constraint := &Constraint{}
+
+	query := `SELECT id, job_id, constraint_type_id, config, created_at FROM constraints WHERE id = ?`
+
+	err := db.QueryRow(query, id).Scan(
+		&constraint.ID,
+		&constraint.JobID,
+		&constraint.ConstraintTypeID,
+		&constraint.Config,
+		&constraint.CreatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return constraint, nil
+}
+
+// GetConstraintsByJob retrieves all constraints for a job
+func (db *DB) GetConstraintsByJob(jobID string) ([]Constraint, error) {
 	query := `
-		SELECT id, job_id, action_type_id, trigger, constraint_type_id, config
-		FROM job_actions
+		SELECT id, job_id, constraint_type_id, config, created_at
+		FROM constraints
 		WHERE job_id = ?
-		ORDER BY id
+		ORDER BY created_at
 	`
 
 	rows, err := db.Query(query, jobID)
@@ -303,37 +328,30 @@ func (db *DB) GetJobActions(jobID string) ([]JobAction, error) {
 	}
 	defer rows.Close()
 
-	var jobActions []JobAction
+	var constraints []Constraint
 	for rows.Next() {
-		var ja JobAction
-		err := rows.Scan(
-			&ja.ID,
-			&ja.JobID,
-			&ja.ActionTypeID,
-			&ja.Trigger,
-			&ja.ConstraintTypeID,
-			&ja.Config,
-		)
+		var c Constraint
+		err := rows.Scan(&c.ID, &c.JobID, &c.ConstraintTypeID, &c.Config, &c.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
-		jobActions = append(jobActions, ja)
+		constraints = append(constraints, c)
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
 
-	if jobActions == nil {
-		jobActions = []JobAction{}
+	if constraints == nil {
+		constraints = []Constraint{}
 	}
 
-	return jobActions, nil
+	return constraints, nil
 }
 
-// DeleteJobAction removes a job action by ID
-func (db *DB) DeleteJobAction(id string) error {
-	query := `DELETE FROM job_actions WHERE id = ?`
+// DeleteConstraint removes a constraint by ID
+func (db *DB) DeleteConstraint(id string) error {
+	query := `DELETE FROM constraints WHERE id = ?`
 
 	result, err := db.Exec(query, id)
 	if err != nil {
@@ -353,33 +371,145 @@ func (db *DB) DeleteJobAction(id string) error {
 }
 
 // =============================================================================
-// Constraint Violation Operations
+// Action Operations
 // =============================================================================
 
-// CreateConstraintViolation records a constraint violation
-func (db *DB) CreateConstraintViolation(violation *ConstraintViolation) error {
+// CreateAction creates a new action for a constraint
+func (db *DB) CreateAction(action *Action) error {
+	now := time.Now()
+	action.CreatedAt = now
+
 	query := `
-		INSERT INTO constraint_violations (id, run_id, constraint_type_id, violation_time, details)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO actions (id, constraint_id, action_type_id, trigger, config, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 	`
 
 	_, err := db.Exec(query,
-		violation.ID,
-		violation.RunID,
-		violation.ConstraintTypeID,
-		violation.ViolationTime,
-		violation.Details,
+		action.ID,
+		action.ConstraintID,
+		action.ActionTypeID,
+		action.Trigger,
+		action.Config,
+		action.CreatedAt,
 	)
 	return err
 }
 
-// GetConstraintViolations retrieves all violations for a run
-func (db *DB) GetConstraintViolations(runID string) ([]ConstraintViolation, error) {
+// GetAction retrieves an action by ID
+func (db *DB) GetAction(id string) (*Action, error) {
+	action := &Action{}
+
+	query := `SELECT id, constraint_id, action_type_id, trigger, config, created_at FROM actions WHERE id = ?`
+
+	err := db.QueryRow(query, id).Scan(
+		&action.ID,
+		&action.ConstraintID,
+		&action.ActionTypeID,
+		&action.Trigger,
+		&action.Config,
+		&action.CreatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return action, nil
+}
+
+// GetActionsByConstraint retrieves all actions for a constraint
+func (db *DB) GetActionsByConstraint(constraintID string) ([]Action, error) {
 	query := `
-		SELECT id, run_id, constraint_type_id, violation_time, details
-		FROM constraint_violations
+		SELECT id, constraint_id, action_type_id, trigger, config, created_at
+		FROM actions
+		WHERE constraint_id = ?
+		ORDER BY created_at
+	`
+
+	rows, err := db.Query(query, constraintID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var actions []Action
+	for rows.Next() {
+		var a Action
+		err := rows.Scan(&a.ID, &a.ConstraintID, &a.ActionTypeID, &a.Trigger, &a.Config, &a.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		actions = append(actions, a)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if actions == nil {
+		actions = []Action{}
+	}
+
+	return actions, nil
+}
+
+// DeleteAction removes an action by ID
+func (db *DB) DeleteAction(id string) error {
+	query := `DELETE FROM actions WHERE id = ?`
+
+	result, err := db.Exec(query, id)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rows == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// =============================================================================
+// Constraint Run Operations
+// =============================================================================
+
+// CreateConstraintRun records a constraint check execution
+func (db *DB) CreateConstraintRun(constraintRun *ConstraintRun) error {
+	query := `
+		INSERT INTO constraint_runs (id, run_id, constraint_id, executed_at, success, violated, in_error, error, details)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := db.Exec(query,
+		constraintRun.ID,
+		constraintRun.RunID,
+		constraintRun.ConstraintID,
+		constraintRun.ExecutedAt,
+		constraintRun.Success,
+		constraintRun.Violated,
+		constraintRun.InError,
+		constraintRun.Error,
+		constraintRun.Details,
+	)
+	return err
+}
+
+// GetConstraintRuns retrieves all constraint runs for a job run
+func (db *DB) GetConstraintRuns(runID string) ([]ConstraintRun, error) {
+	query := `
+		SELECT id, run_id, constraint_id, executed_at, success, violated, in_error, error, details
+		FROM constraint_runs
 		WHERE run_id = ?
-		ORDER BY violation_time DESC
+		ORDER BY executed_at DESC
 	`
 
 	rows, err := db.Query(query, runID)
@@ -388,74 +518,82 @@ func (db *DB) GetConstraintViolations(runID string) ([]ConstraintViolation, erro
 	}
 	defer rows.Close()
 
-	var violations []ConstraintViolation
+	var constraintRuns []ConstraintRun
 	for rows.Next() {
-		var v ConstraintViolation
+		var cr ConstraintRun
 		err := rows.Scan(
-			&v.ID,
-			&v.RunID,
-			&v.ConstraintTypeID,
-			&v.ViolationTime,
-			&v.Details,
+			&cr.ID,
+			&cr.RunID,
+			&cr.ConstraintID,
+			&cr.ExecutedAt,
+			&cr.Success,
+			&cr.Violated,
+			&cr.InError,
+			&cr.Error,
+			&cr.Details,
 		)
 		if err != nil {
 			return nil, err
 		}
-		violations = append(violations, v)
+		constraintRuns = append(constraintRuns, cr)
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
 
-	if violations == nil {
-		violations = []ConstraintViolation{}
+	if constraintRuns == nil {
+		constraintRuns = []ConstraintRun{}
 	}
 
-	return violations, nil
+	return constraintRuns, nil
 }
 
-// GetConstraintViolationsByType retrieves violations for a specific constraint type
-func (db *DB) GetConstraintViolationsByType(constraintTypeID int, limit int) ([]ConstraintViolation, error) {
+// GetConstraintRunsByConstraint retrieves constraint runs for a specific constraint
+func (db *DB) GetConstraintRunsByConstraint(constraintID string, limit int) ([]ConstraintRun, error) {
 	query := `
-		SELECT id, run_id, constraint_type_id, violation_time, details
-		FROM constraint_violations
-		WHERE constraint_type_id = ?
-		ORDER BY violation_time DESC
+		SELECT id, run_id, constraint_id, executed_at, success, violated, in_error, error, details
+		FROM constraint_runs
+		WHERE constraint_id = ?
+		ORDER BY executed_at DESC
 		LIMIT ?
 	`
 
-	rows, err := db.Query(query, constraintTypeID, limit)
+	rows, err := db.Query(query, constraintID, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var violations []ConstraintViolation
+	var constraintRuns []ConstraintRun
 	for rows.Next() {
-		var v ConstraintViolation
+		var cr ConstraintRun
 		err := rows.Scan(
-			&v.ID,
-			&v.RunID,
-			&v.ConstraintTypeID,
-			&v.ViolationTime,
-			&v.Details,
+			&cr.ID,
+			&cr.RunID,
+			&cr.ConstraintID,
+			&cr.ExecutedAt,
+			&cr.Success,
+			&cr.Violated,
+			&cr.InError,
+			&cr.Error,
+			&cr.Details,
 		)
 		if err != nil {
 			return nil, err
 		}
-		violations = append(violations, v)
+		constraintRuns = append(constraintRuns, cr)
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
 
-	if violations == nil {
-		violations = []ConstraintViolation{}
+	if constraintRuns == nil {
+		constraintRuns = []ConstraintRun{}
 	}
 
-	return violations, nil
+	return constraintRuns, nil
 }
 // =============================================================================
 // Action Run Operations
@@ -464,16 +602,15 @@ func (db *DB) GetConstraintViolationsByType(constraintTypeID int, limit int) ([]
 // CreateActionRun records an action execution
 func (db *DB) CreateActionRun(actionRun *ActionRun) error {
 	query := `
-		INSERT INTO action_runs (id, run_id, action_type_id, trigger, constraint_violation_id, executed_at, success, error, details)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO action_runs (id, run_id, constraint_run_id, action_id, executed_at, success, error, details)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	_, err := db.Exec(query,
 		actionRun.ID,
 		actionRun.RunID,
-		actionRun.ActionTypeID,
-		actionRun.Trigger,
-		actionRun.ConstraintViolationID,
+		actionRun.ConstraintRunID,
+		actionRun.ActionID,
 		actionRun.ExecutedAt,
 		actionRun.Success,
 		actionRun.Error,
@@ -485,7 +622,7 @@ func (db *DB) CreateActionRun(actionRun *ActionRun) error {
 // GetActionRuns retrieves all action runs for a run
 func (db *DB) GetActionRuns(runID string) ([]ActionRun, error) {
 	query := `
-		SELECT id, run_id, action_type_id, trigger, constraint_violation_id, executed_at, success, error, details
+		SELECT id, run_id, constraint_run_id, action_id, executed_at, success, error, details
 		FROM action_runs
 		WHERE run_id = ?
 		ORDER BY executed_at DESC
@@ -503,9 +640,8 @@ func (db *DB) GetActionRuns(runID string) ([]ActionRun, error) {
 		err := rows.Scan(
 			&ar.ID,
 			&ar.RunID,
-			&ar.ActionTypeID,
-			&ar.Trigger,
-			&ar.ConstraintViolationID,
+			&ar.ConstraintRunID,
+			&ar.ActionID,
 			&ar.ExecutedAt,
 			&ar.Success,
 			&ar.Error,
@@ -528,17 +664,17 @@ func (db *DB) GetActionRuns(runID string) ([]ActionRun, error) {
 	return actionRuns, nil
 }
 
-// GetActionRunsByType retrieves action runs for a specific action type
-func (db *DB) GetActionRunsByType(actionTypeID int, limit int) ([]ActionRun, error) {
+// GetActionRunsByAction retrieves action runs for a specific action
+func (db *DB) GetActionRunsByAction(actionID string, limit int) ([]ActionRun, error) {
 	query := `
-		SELECT id, run_id, action_type_id, trigger, constraint_violation_id, executed_at, success, error, details
+		SELECT id, run_id, constraint_run_id, action_id, executed_at, success, error, details
 		FROM action_runs
-		WHERE action_type_id = ?
+		WHERE action_id = ?
 		ORDER BY executed_at DESC
 		LIMIT ?
 	`
 
-	rows, err := db.Query(query, actionTypeID, limit)
+	rows, err := db.Query(query, actionID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -550,9 +686,8 @@ func (db *DB) GetActionRunsByType(actionTypeID int, limit int) ([]ActionRun, err
 		err := rows.Scan(
 			&ar.ID,
 			&ar.RunID,
-			&ar.ActionTypeID,
-			&ar.Trigger,
-			&ar.ConstraintViolationID,
+			&ar.ConstraintRunID,
+			&ar.ActionID,
 			&ar.ExecutedAt,
 			&ar.Success,
 			&ar.Error,

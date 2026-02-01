@@ -8,8 +8,8 @@ import (
 // CreateJobRun creates a new job run record
 func (db *DB) CreateJobRun(run *JobRun) error {
 	query := `
-		INSERT INTO job_runs (job_id, run_id, scheduled_at, started_at, completed_at, status, success, error)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO job_runs (job_id, run_id, scheduled_at, started_at, completed_at, status, success, error, trigger)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	_, err := db.Exec(query,
@@ -21,6 +21,7 @@ func (db *DB) CreateJobRun(run *JobRun) error {
 		run.Status,
 		run.Success,
 		run.Error,
+		run.Trigger,
 	)
 
 	return err
@@ -31,7 +32,7 @@ func (db *DB) GetJobRun(jobID string, scheduledAt time.Time) (*JobRun, error) {
 	run := &JobRun{}
 
 	query := `
-		SELECT job_id, run_id, scheduled_at, started_at, completed_at, status, success, error
+		SELECT job_id, run_id, scheduled_at, started_at, completed_at, status, success, error, trigger
 		FROM job_runs
 		WHERE job_id = ? AND scheduled_at = ?
 	`
@@ -45,6 +46,7 @@ func (db *DB) GetJobRun(jobID string, scheduledAt time.Time) (*JobRun, error) {
 		&run.Status,
 		&run.Success,
 		&run.Error,
+		&run.Trigger,
 	)
 
 	if err == sql.ErrNoRows {
@@ -63,7 +65,7 @@ func (db *DB) GetJobRunByRunID(runID string) (*JobRun, error) {
 	run := &JobRun{}
 
 	query := `
-		SELECT job_id, run_id, scheduled_at, started_at, completed_at, status, success, error
+		SELECT job_id, run_id, scheduled_at, started_at, completed_at, status, success, error, trigger
 		FROM job_runs
 		WHERE run_id = ?
 	`
@@ -77,6 +79,7 @@ func (db *DB) GetJobRunByRunID(runID string) (*JobRun, error) {
 		&run.Status,
 		&run.Success,
 		&run.Error,
+		&run.Trigger,
 	)
 
 	if err == sql.ErrNoRows {
@@ -93,7 +96,7 @@ func (db *DB) GetJobRunByRunID(runID string) (*JobRun, error) {
 // GetJobRuns retrieves all runs for a job
 func (db *DB) GetJobRuns(jobID string, limit int) ([]JobRun, error) {
 	query := `
-		SELECT job_id, run_id, scheduled_at, started_at, completed_at, status, success, error
+		SELECT job_id, run_id, scheduled_at, started_at, completed_at, status, success, error, trigger
 		FROM job_runs
 		WHERE job_id = ?
 		ORDER BY scheduled_at DESC
@@ -118,6 +121,7 @@ func (db *DB) GetJobRuns(jobID string, limit int) ([]JobRun, error) {
 			&run.Status,
 			&run.Success,
 			&run.Error,
+			&run.Trigger,
 		)
 		if err != nil {
 			return nil, err

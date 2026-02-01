@@ -186,60 +186,6 @@ func (db *DB) CreateStatsCollectorStats(stats *StatsCollectorStats) error {
 	return err
 }
 
-// CreateWebhookDelivery records a webhook delivery attempt (future)
-func (db *DB) CreateWebhookDelivery(delivery *WebhookDelivery) error {
-	query := `
-		INSERT INTO webhook_deliveries (
-			id, run_id, webhook_type, trigger, url, attempt_count,
-			status_code, success, error, request_duration, created_at, delivered_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-
-	_, err := db.Exec(query,
-		delivery.ID,
-		delivery.RunID,
-		delivery.WebhookType,
-		delivery.Trigger,
-		delivery.URL,
-		delivery.AttemptCount,
-		delivery.StatusCode,
-		delivery.Success,
-		delivery.Error,
-		delivery.RequestDuration,
-		delivery.CreatedAt,
-		delivery.DeliveredAt,
-	)
-	return err
-}
-
-// CreateWebhookHandlerStats records webhook handler statistics for a period (future)
-func (db *DB) CreateWebhookHandlerStats(stats *WebhookHandlerStats) error {
-	query := `
-		INSERT INTO webhook_handler_stats (
-			stats_period_id, start_time, end_time, webhooks_sent, webhooks_succeeded, webhooks_failed,
-			total_retries, avg_delivery_time, max_delivery_time, min_delivery_time,
-			avg_inbox_length, max_inbox_length, min_inbox_length
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`
-
-	_, err := db.Exec(query,
-		stats.StatsPeriodID,
-		stats.StartTime,
-		stats.EndTime,
-		stats.WebhooksSent,
-		stats.WebhooksSucceeded,
-		stats.WebhooksFailed,
-		stats.TotalRetries,
-		stats.AvgDeliveryTime,
-		stats.MaxDeliveryTime,
-		stats.MinDeliveryTime,
-		stats.AvgInboxLength,
-		stats.MaxInboxLength,
-		stats.MinInboxLength,
-	)
-	return err
-}
-
 // GetSyncerStats retrieves syncer statistics for a time range
 func (db *DB) GetSyncerStats(startTime, endTime time.Time) ([]SyncerStats, error) {
 	query := `

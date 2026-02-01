@@ -16,23 +16,31 @@ type ActionType struct {
 
 // Job represents a scheduled job definition
 type Job struct {
-	ID          string
-	Name        string
-	Schedule    string
-	PodSpec     string    // JSON - Kubernetes pod specification
-	Constraints *string   // JSON - map of constraint_type_id → constraint config
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID        string
+	Name      string
+	Schedule  string
+	PodSpec   string    // JSON - Kubernetes pod specification
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
-// JobAction represents an action configured for a job
-type JobAction struct {
-	ID                 string
-	JobID              string
-	ActionTypeID       int
-	Trigger            string // 'on_failure', 'on_violation', 'on_success', 'on_timeout'
-	ConstraintTypeID   *int   // FK: Only used when Trigger is 'on_violation'
-	Config             *string // JSON - action-specific configuration
+// Constraint represents a specific constraint configuration for a job
+type Constraint struct {
+	ID               string
+	JobID            string
+	ConstraintTypeID int
+	Config           *string // JSON - constraint-specific configuration
+	CreatedAt        time.Time
+}
+
+// Action represents an action that can be triggered when a constraint is met or violated
+type Action struct {
+	ID           string
+	ConstraintID string
+	ActionTypeID int
+	Trigger      string  // 'on_met', 'on_violated'
+	Config       *string // JSON - action-specific configuration
+	CreatedAt    time.Time
 }
 
 // JobRun represents a single execution of a job
@@ -45,28 +53,32 @@ type JobRun struct {
 	Status      string
 	Success     *bool
 	Error       *string
+	Trigger     string // 'scheduled', 'manual', 'retry', 'action'
 }
 
-// ConstraintViolation represents a constraint violation
-type ConstraintViolation struct {
-	ID               string
-	RunID            string
-	ConstraintTypeID int
-	ViolationTime    time.Time
-	Details          *string // JSON - violation-specific details
+// ConstraintRun represents a single execution of a constraint check
+type ConstraintRun struct {
+	ID           string
+	RunID        string
+	ConstraintID string
+	ExecutedAt   time.Time
+	Success      bool
+	Violated     bool
+	InError      bool
+	Error        *string
+	Details      *string // JSON - run-specific details
 }
 
 // ActionRun represents an action execution
 type ActionRun struct {
-	ID                      string
-	RunID                   string
-	ActionTypeID            int
-	Trigger                 string  // 'on_failure', 'on_violation', 'on_success', 'manual'
-	ConstraintViolationID   *string // FK: references the violation that triggered this action
-	ExecutedAt              time.Time
-	Success                 bool
-	Error                   *string
-	Details                 *string // JSON - action-specific details (webhook response, retry count, etc.)
+	ID               string
+	RunID            string
+	ConstraintRunID  *string // FK: references the constraint run that triggered this action
+	ActionID         string
+	ExecutedAt       time.Time
+	Success          bool
+	Error            *string
+	Details          *string // JSON - action-specific details (webhook response, retry count, etc.)
 }
 
 // SchedulerStats represents scheduler performance metrics
@@ -144,37 +156,4 @@ type StatsCollectorStats struct {
 	AvgProcessingTime      *float64 // microseconds
 	MaxProcessingTime      *int     // microseconds
 	MinProcessingTime      *int     // microseconds
-}
-
-// WebhookDelivery represents a webhook delivery attempt (future)
-type WebhookDelivery struct {
-	ID              string
-	RunID           string
-	WebhookType     string // 'slack', 'newrelic', 'pagerduty', 'custom'
-	Trigger         string // 'on_failure', 'on_violation', 'on_success', 'manual'
-	URL             string
-	AttemptCount    int
-	StatusCode      *int
-	Success         bool
-	Error           *string
-	RequestDuration *int       // milliseconds
-	CreatedAt       time.Time
-	DeliveredAt     *time.Time
-}
-
-// WebhookHandlerStats represents webhook handler performance metrics (future)
-type WebhookHandlerStats struct {
-	StatsPeriodID      string
-	StartTime          time.Time
-	EndTime            time.Time
-	WebhooksSent       int
-	WebhooksSucceeded  int
-	WebhooksFailed     int
-	TotalRetries       int
-	AvgDeliveryTime    *float64 // milliseconds
-	MaxDeliveryTime    *int     // milliseconds
-	MinDeliveryTime    *int     // milliseconds
-	AvgInboxLength     *float64
-	MaxInboxLength     *int
-	MinInboxLength     *int
 }

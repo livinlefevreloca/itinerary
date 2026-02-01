@@ -18,21 +18,29 @@ func initTestSchema(db *DB) error {
 			name TEXT NOT NULL,
 			schedule TEXT NOT NULL,
 			pod_spec TEXT,
-			constraints TEXT,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		);
 
-		CREATE TABLE IF NOT EXISTS job_actions (
+		CREATE TABLE IF NOT EXISTS constraints (
 			id TEXT PRIMARY KEY,
 			job_id TEXT NOT NULL,
+			constraint_type_id INTEGER NOT NULL,
+			config TEXT,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+			FOREIGN KEY (constraint_type_id) REFERENCES constraint_types(id) ON DELETE CASCADE
+		);
+
+		CREATE TABLE IF NOT EXISTS actions (
+			id TEXT PRIMARY KEY,
+			constraint_id TEXT NOT NULL,
 			action_type_id INTEGER NOT NULL,
 			trigger TEXT NOT NULL,
-			constraint_type_id INTEGER,
 			config TEXT,
-			FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
-			FOREIGN KEY (action_type_id) REFERENCES action_types(id) ON DELETE CASCADE,
-			FOREIGN KEY (constraint_type_id) REFERENCES constraint_types(id) ON DELETE CASCADE
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (constraint_id) REFERENCES constraints(id) ON DELETE CASCADE,
+			FOREIGN KEY (action_type_id) REFERENCES action_types(id) ON DELETE CASCADE
 		);
 
 		CREATE TABLE IF NOT EXISTS job_runs (
@@ -44,29 +52,50 @@ func initTestSchema(db *DB) error {
 			status TEXT NOT NULL,
 			success BOOLEAN,
 			error TEXT,
+			trigger TEXT NOT NULL,
 			PRIMARY KEY (job_id, scheduled_at),
 			FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 		);
 
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_job_runs_run_id ON job_runs(run_id);
-		CREATE INDEX IF NOT EXISTS idx_job_actions_job_id ON job_actions(job_id);
-		CREATE INDEX IF NOT EXISTS idx_job_actions_action_type_id ON job_actions(action_type_id);
-		CREATE INDEX IF NOT EXISTS idx_job_actions_constraint_type_id ON job_actions(constraint_type_id);
 		CREATE INDEX IF NOT EXISTS idx_job_runs_job_id ON job_runs(job_id);
+		CREATE INDEX IF NOT EXISTS idx_constraints_job_id ON constraints(job_id);
+		CREATE INDEX IF NOT EXISTS idx_actions_constraint_id ON actions(constraint_id);
 
-		CREATE TABLE IF NOT EXISTS constraint_violations (
+		CREATE TABLE IF NOT EXISTS constraint_runs (
 			id TEXT PRIMARY KEY,
 			run_id TEXT NOT NULL,
-			constraint_type_id INTEGER NOT NULL,
-			violation_time TIMESTAMP NOT NULL,
-			action_taken TEXT,
+			constraint_id TEXT NOT NULL,
+			executed_at TIMESTAMP NOT NULL,
+			success BOOLEAN NOT NULL,
+			violated BOOLEAN NOT NULL,
+			in_error BOOLEAN NOT NULL,
+			error TEXT,
 			details TEXT,
 			FOREIGN KEY (run_id) REFERENCES job_runs(run_id) ON DELETE CASCADE,
-			FOREIGN KEY (constraint_type_id) REFERENCES constraint_types(id) ON DELETE CASCADE
+			FOREIGN KEY (constraint_id) REFERENCES constraints(id) ON DELETE CASCADE
 		);
 
-		CREATE INDEX IF NOT EXISTS idx_constraint_violations_run_id ON constraint_violations(run_id);
-		CREATE INDEX IF NOT EXISTS idx_constraint_violations_constraint_type_id ON constraint_violations(constraint_type_id);
+		CREATE INDEX IF NOT EXISTS idx_constraint_runs_run_id ON constraint_runs(run_id);
+		CREATE INDEX IF NOT EXISTS idx_constraint_runs_constraint_id ON constraint_runs(constraint_id);
+
+		CREATE TABLE IF NOT EXISTS action_runs (
+			id TEXT PRIMARY KEY,
+			run_id TEXT NOT NULL,
+			constraint_run_id TEXT,
+			action_id TEXT NOT NULL,
+			executed_at TIMESTAMP NOT NULL,
+			success BOOLEAN NOT NULL,
+			error TEXT,
+			details TEXT,
+			FOREIGN KEY (run_id) REFERENCES job_runs(run_id) ON DELETE CASCADE,
+			FOREIGN KEY (constraint_run_id) REFERENCES constraint_runs(id) ON DELETE CASCADE,
+			FOREIGN KEY (action_id) REFERENCES actions(id) ON DELETE CASCADE
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_action_runs_run_id ON action_runs(run_id);
+		CREATE INDEX IF NOT EXISTS idx_action_runs_constraint_run_id ON action_runs(constraint_run_id);
+		CREATE INDEX IF NOT EXISTS idx_action_runs_action_id ON action_runs(action_id);
 
 		CREATE TABLE IF NOT EXISTS scheduler_stats (
 			stats_period_id TEXT PRIMARY KEY,

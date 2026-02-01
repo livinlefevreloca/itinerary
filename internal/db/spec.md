@@ -113,87 +113,80 @@ func (db *DB) WithTransaction(fn func(*Tx) error) error
 
 ### Core Tables
 
+**Note**: The schema uses dimension tables (`constraint_types` and `action_types`) to define built-in types, with separate tables (`constraints` and `actions`) for instances.
+
 #### Constraints Table
-Stores built-in constraint configurations for jobs.
+Stores constraint instances attached to jobs. Each constraint is a specific configuration of a constraint type.
 
 ```sql
 CREATE TABLE constraints (
     id TEXT PRIMARY KEY,
-    max_concurrent_runs INTEGER,
-    catch_up BOOLEAN,
-    catch_up_window TEXT,         -- Duration string (e.g., "5m")
-    max_expected_run_time TEXT,   -- Duration string (e.g., "1h")
-    max_allowed_run_time TEXT,    -- Duration string (e.g., "2h")
-    pre_run_hook TEXT,             -- JSON webhook configuration
-    post_run_hook TEXT,            -- JSON webhook configuration
-    require_previous_success TEXT, -- JSON dependency configuration
+    job_id TEXT NOT NULL,
+    constraint_type_id INTEGER NOT NULL,
+    config TEXT,                  -- JSON configuration specific to constraint type
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+    FOREIGN KEY (constraint_type_id) REFERENCES constraint_types(id) ON DELETE CASCADE
 );
 ```
 
 ```go
 type Constraint struct {
-    ID                      string
-    MaxConcurrentRuns       *int
-    CatchUp                 *bool
-    CatchUpWindow           *string
-    MaxExpectedRunTime      *string
-    MaxAllowedRunTime       *string
-    PreRunHook              *string // JSON
-    PostRunHook             *string // JSON
-    RequirePreviousSuccess  *string // JSON
-    CreatedAt               time.Time
-    UpdatedAt               time.Time
+    ID               string
+    JobID            string
+    ConstraintTypeID int
+    Config           *string // JSON
+    CreatedAt        time.Time
 }
 ```
 
-**PreRunHook/PostRunHook JSON structure:**
+**Config JSON structure example (maxConcurrentRuns):**
 ```json
 {
-  "type": "slack",
-  "url": "https://hooks.slack.com/...",
-  "channel": "#notifications"
+  "value": 5
 }
 ```
 
-**RequirePreviousSuccess JSON structure:**
+**Config JSON structure example (maxExpectedRunTime):**
 ```json
 {
-  "jobID": "parent-job-id",
-  "args": ["arg1", "arg2"]
+  "value": "2h"
 }
 ```
 
 #### Actions Table
-Stores action definitions that can be triggered on job events.
+Stores action instances that can be triggered when constraints are met or violated. Actions belong to specific constraints.
 
 ```sql
 CREATE TABLE actions (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    action_type TEXT NOT NULL,  -- 'retry', 'kickOffJob', 'webhook', 'killAllInstances', 'killLatestInstance', 'skipNextInstance'
+    constraint_id TEXT NOT NULL,
+    action_type_id INTEGER NOT NULL,
+    trigger TEXT NOT NULL,      -- 'on_met', 'on_violated'
     config TEXT,                -- JSON configuration specific to action type
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (constraint_id) REFERENCES constraints(id) ON DELETE CASCADE,
+    FOREIGN KEY (action_type_id) REFERENCES action_types(id) ON DELETE CASCADE
 );
 ```
 
 ```go
 type Action struct {
-    ID         string
-    Name       string
-    ActionType string
-    Config     *string // JSON
-    CreatedAt  time.Time
+    ID           string
+    ConstraintID string
+    ActionTypeID int
+    Trigger      string
+    Config       *string // JSON
+    CreatedAt    time.Time
 }
 ```
 
 **Config JSON structure (webhook example):**
 ```json
 {
-  "type": "slack",
   "url": "https://hooks.slack.com/...",
-  "channel": "#alerts"
+  "channel": "#alerts",
+  "message": "Job exceeded runtime limit"
 }
 ```
 
@@ -214,58 +207,21 @@ CREATE TABLE jobs (
     name TEXT NOT NULL,
     schedule TEXT NOT NULL,     -- Cron expression
     pod_spec TEXT,              -- Kubernetes pod specification (JSON)
-    constraint_id TEXT,         -- Foreign key to constraints table
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (constraint_id) REFERENCES constraints(id) ON DELETE SET NULL
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE INDEX idx_jobs_constraint_id ON jobs(constraint_id);
 ```
 
 ```go
 type Job struct {
-    ID           string
-    Name         string
-    Schedule     string
-    PodSpec      string
-    ConstraintID *string
-    CreatedAt    time.Time
-    UpdatedAt    time.Time
+    ID        string
+    Name      string
+    Schedule  string
+    PodSpec   string
+    CreatedAt time.Time
+    UpdatedAt time.Time
 }
 ```
-
-#### Job Actions Junction Table
-Many-to-many relationship between jobs and actions, specifying when actions trigger.
-
-```sql
-CREATE TABLE job_actions (
-    job_id TEXT NOT NULL,
-    action_id TEXT NOT NULL,
-    trigger TEXT NOT NULL,       -- 'on_failure', 'on_violation', 'on_success', 'on_timeout'
-    constraint_id TEXT,          -- FK: When trigger is 'on_violation', specifies which constraint must be violated
-    PRIMARY KEY (job_id, action_id),
-    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
-    FOREIGN KEY (action_id) REFERENCES actions(id) ON DELETE CASCADE,
-    FOREIGN KEY (constraint_id) REFERENCES constraints(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_job_actions_constraint_id ON job_actions(constraint_id);
-```
-
-```go
-type JobAction struct {
-    JobID        string
-    ActionID     string
-    Trigger      string
-    ConstraintID *string // FK: Only used when Trigger is 'on_violation'
-}
-```
-
-**Example configurations:**
-- Trigger webhook on any constraint violation: `{Trigger: "on_violation", ConstraintID: nil}`
-- Trigger webhook only on specific constraint violations: `{Trigger: "on_violation", ConstraintID: "constraint-1"}`
-- Trigger retry on any failure: `{Trigger: "on_failure", ConstraintID: nil}`
 
 #### Job Runs Table
 Tracks individual executions of jobs.
@@ -280,6 +236,7 @@ CREATE TABLE job_runs (
     status TEXT NOT NULL,  -- 'pending', 'running', 'completed', 'failed', 'cancelled'
     success BOOLEAN,
     error TEXT,
+    trigger TEXT NOT NULL, -- 'scheduled', 'manual', 'retry', 'action'
     PRIMARY KEY (job_id, scheduled_at),
     FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
 );
@@ -302,49 +259,67 @@ type JobRun struct {
     Status      string
     Success     *bool
     Error       *string
+    Trigger     string
 }
 ```
 
-#### Constraint Violations Table
-Tracks constraint violations and actions taken.
+**Trigger values:**
+- `scheduled` - Run triggered by the scheduler based on cron schedule
+- `manual` - Run triggered manually by a user
+- `retry` - Run triggered by a retry action
+- `action` - Run triggered by another action (e.g., kickOffJob)
+
+#### Constraint Runs Table
+Tracks each execution of a constraint check for a job run.
 
 ```sql
-CREATE TABLE constraint_violations (
+CREATE TABLE constraint_runs (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,
-    constraint_id TEXT NOT NULL,    -- FK to constraints table
-    violation_time TIMESTAMP NOT NULL,
-    action_taken TEXT,              -- e.g., 'retry', 'webhook', 'killAllInstances'
+    constraint_id TEXT NOT NULL,
+    executed_at TIMESTAMP NOT NULL,
+    success BOOLEAN NOT NULL,
+    violated BOOLEAN NOT NULL,
+    in_error BOOLEAN NOT NULL,
+    error TEXT,
     details TEXT,                   -- Additional details (JSON)
     FOREIGN KEY (run_id) REFERENCES job_runs(run_id) ON DELETE CASCADE,
     FOREIGN KEY (constraint_id) REFERENCES constraints(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_constraint_violations_run_id ON constraint_violations(run_id);
-CREATE INDEX idx_constraint_violations_constraint_id ON constraint_violations(constraint_id);
+CREATE INDEX idx_constraint_runs_run_id ON constraint_runs(run_id);
+CREATE INDEX idx_constraint_runs_constraint_id ON constraint_runs(constraint_id);
 ```
 
 ```go
-type ConstraintViolation struct {
+type ConstraintRun struct {
     ID           string
     RunID        string
     ConstraintID string
-    ViolationTime time.Time
-    ActionTaken  *string
-    Details      string
+    ExecutedAt   time.Time
+    Success      bool
+    Violated     bool
+    InError      bool
+    Error        *string
+    Details      *string
 }
 ```
 
-**Details JSON structure:**
+**Constraint Run States:**
+- **Met** (`success=true, violated=false, in_error=false`): Constraint check passed, condition satisfied
+- **Violated** (`success=true, violated=true, in_error=false`): Constraint check completed, but condition violated
+- **In Error** (`success=false, in_error=true`): Constraint check failed to execute properly
+- Actions configured with `on_met` trigger when violated=false
+- Actions configured with `on_violated` trigger when violated=true
+- No actions run when in_error=true
+
+**Details JSON structure example:**
 ```json
 {
   "message": "Job exceeded maxAllowedRunTime of 2h",
-  "currentValue": "2h15m",
-  "threshold": "2h",
-  "webhookResponse": {
-    "status": 200,
-    "body": "..."
-  }
+  "expected": "2h",
+  "actual": "2h15m",
+  "threshold_exceeded_by": "15m"
 }
 ```
 
@@ -439,14 +414,17 @@ The database layer takes a conservative approach to indexing. Indexes are only a
 
 #### Foreign Key Indexes
 All foreign keys have indexes to optimize JOIN operations and foreign key constraint checks:
-- **jobs.constraint_id**: `idx_jobs_constraint_id` - FK to constraints table
-- **job_actions.constraint_id**: `idx_job_actions_constraint_id` - FK to constraints table (nullable)
+- **constraints.job_id**: `idx_constraints_job_id` - FK to jobs table
+- **actions.constraint_id**: `idx_actions_constraint_id` - FK to constraints table
 - **job_runs.job_id**: `idx_job_runs_job_id` - FK to jobs table
-- **constraint_violations.run_id**: `idx_constraint_violations_run_id` - FK to job_runs table
-- **constraint_violations.constraint_id**: `idx_constraint_violations_constraint_id` - FK to constraints table
+- **constraint_runs.run_id**: `idx_constraint_runs_run_id` - FK to job_runs table
+- **constraint_runs.constraint_id**: `idx_constraint_runs_constraint_id` - FK to constraints table
+- **action_runs.run_id**: `idx_action_runs_run_id` - FK to job_runs table
+- **action_runs.constraint_run_id**: `idx_action_runs_constraint_run_id` - FK to constraint_runs table
+- **action_runs.action_id**: `idx_action_runs_action_id` - FK to actions table
 - **orchestrator_stats.stats_period_id**: `idx_orchestrator_stats_stats_period_id` - FK to scheduler_stats table
 
-**Note**: Primary keys automatically create indexes. Composite primary keys (e.g., job_actions) index all PK columns together.
+**Note**: Primary keys automatically create indexes. Composite primary keys (e.g., job_runs) index all PK columns together.
 
 ### Future Indexes
 
@@ -559,46 +537,62 @@ func (db *DB) UpdateConstraint(constraint *Constraint) error
 func (db *DB) DeleteConstraint(id string) error
 ```
 
+### Constraints Queries
+
+```go
+// CreateConstraint creates a new constraint for a job
+func (db *DB) CreateConstraint(constraint *Constraint) error
+
+// GetConstraint retrieves a constraint by ID
+func (db *DB) GetConstraint(id string) (*Constraint, error)
+
+// GetConstraintsByJob retrieves all constraints for a job
+func (db *DB) GetConstraintsByJob(jobID string) ([]Constraint, error)
+
+// DeleteConstraint deletes a constraint by ID
+func (db *DB) DeleteConstraint(id string) error
+```
+
 ### Actions Queries
 
 ```go
-// CreateAction creates a new action
+// CreateAction creates a new action for a constraint
 func (db *DB) CreateAction(action *Action) error
 
 // GetAction retrieves an action by ID
 func (db *DB) GetAction(id string) (*Action, error)
 
-// GetAllActions retrieves all actions
-func (db *DB) GetAllActions() ([]Action, error)
+// GetActionsByConstraint retrieves all actions for a constraint
+func (db *DB) GetActionsByConstraint(constraintID string) ([]Action, error)
 
 // DeleteAction deletes an action by ID
 func (db *DB) DeleteAction(id string) error
 ```
 
-### Job Actions Queries
+### Constraint Run Queries
 
 ```go
-// CreateJobAction associates an action with a job
-func (db *DB) CreateJobAction(jobAction *JobAction) error
+// CreateConstraintRun records a constraint check execution
+func (db *DB) CreateConstraintRun(constraintRun *ConstraintRun) error
 
-// GetJobActions retrieves all actions for a job
-func (db *DB) GetJobActions(jobID string) ([]JobAction, error)
+// GetConstraintRuns retrieves all constraint runs for a job run
+func (db *DB) GetConstraintRuns(runID string) ([]ConstraintRun, error)
 
-// DeleteJobAction removes an action association from a job
-func (db *DB) DeleteJobAction(jobID string, actionID string) error
+// GetConstraintRunsByConstraint retrieves constraint runs for a specific constraint
+func (db *DB) GetConstraintRunsByConstraint(constraintID string, limit int) ([]ConstraintRun, error)
 ```
 
-### Constraint Violation Queries
+### Action Run Queries
 
 ```go
-// CreateConstraintViolation records a constraint violation
-func (db *DB) CreateConstraintViolation(violation *ConstraintViolation) error
+// CreateActionRun records an action execution
+func (db *DB) CreateActionRun(actionRun *ActionRun) error
 
-// GetConstraintViolations retrieves all violations for a run
-func (db *DB) GetConstraintViolations(runID string) ([]ConstraintViolation, error)
+// GetActionRuns retrieves all action runs for a job run
+func (db *DB) GetActionRuns(runID string) ([]ActionRun, error)
 
-// GetConstraintViolationsByConstraint retrieves violations for a specific constraint
-func (db *DB) GetConstraintViolationsByConstraint(constraintID string, limit int) ([]ConstraintViolation, error)
+// GetActionRunsByAction retrieves action runs for a specific action
+func (db *DB) GetActionRunsByAction(actionID string, limit int) ([]ActionRun, error)
 ```
 
 ### Stats Queries
