@@ -23,9 +23,9 @@ The constraint module provides a pluggable system for evaluating constraints on 
    - `onViolation`: Actions to take when constraint is violated
    - `onMet`: Actions to take when constraint is met
 
-6. **Message-Based Communication** - Constraints communicate with the scheduler via message passing. They can send requests to the scheduler inbox and receive responses for information like job states, run history, etc.
+6. **Scheduler as Source of Truth** - Constraints query the scheduler (not the database) for live job state information via message passing. The scheduler maintains the in-memory source of truth for what jobs are running, scheduled, and recently completed.
 
-7. **No Direct I/O** - Constraints must not perform I/O directly. All external communication (database queries, HTTP requests) is delegated through message passing to maintain the lock-free scheduler design.
+7. **Direct I/O Allowed** - Constraints run in the orchestrator goroutine and can perform I/O directly (HTTP requests, external API calls). They do not run in the scheduler loop hotpath.
 
 ## Core Interfaces
 
@@ -117,11 +117,13 @@ type ExecutionContext struct {
     EndTime   *time.Time
     ExitCode  *int
 
-    // Message-based communication with scheduler
+    // Message-based communication with scheduler for job state queries
     SchedulerInbox MessageSender
-    ResponseChan   <-chan interface{} // For receiving responses from scheduler
 
-    // External communication (delegated to other components)
+    // HTTP client for making external requests
+    HTTPClient *http.Client
+
+    // Webhook handler for sending notifications
     WebhookHandler WebhookSender
 
     // Logging
@@ -142,13 +144,13 @@ type WebhookSender interface {
 
 ### Scheduler Communication
 
-Constraints can query the scheduler for information via request/response messages:
+Constraints query the scheduler for live job state via request/response messages. The scheduler is the source of truth for what's currently running, not the database.
 
 ```go
 // Example: Check if another job is running
 type JobStateRequest struct {
     JobID      string
-    ResponseTo chan<- interface{}
+    ResponseTo chan interface{}
 }
 
 type JobStateResponse struct {
@@ -160,9 +162,10 @@ type JobStateResponse struct {
 
 // In constraint implementation:
 func (c *OtherJobRunningConstraint) Check(ctx *ExecutionContext) (ConstraintResult, error) {
+    responseChan := make(chan interface{}, 1)
     request := &JobStateRequest{
         JobID:      c.otherJobID,
-        ResponseTo: ctx.ResponseChan,
+        ResponseTo: responseChan,
     }
 
     if err := ctx.SchedulerInbox.Send(request); err != nil {
@@ -170,7 +173,7 @@ func (c *OtherJobRunningConstraint) Check(ctx *ExecutionContext) (ConstraintResu
     }
 
     select {
-    case resp := <-ctx.ResponseChan:
+    case resp := <-responseChan:
         state := resp.(*JobStateResponse)
         return ConstraintResult{
             Met:     !state.IsRunning, // Met if job is NOT running
@@ -184,7 +187,7 @@ func (c *OtherJobRunningConstraint) Check(ctx *ExecutionContext) (ConstraintResu
 
 ## Configuration Format
 
-Constraints are configured as JSON in the `Job.ConstraintConfig` field:
+Constraints are stored in the database and loaded by the constraint checker. Example configurations:
 
 ```json
 {
@@ -208,8 +211,25 @@ Constraints are configured as JSON in the `Job.ConstraintConfig` field:
         {
           "type": "webhook",
           "config": {
-            "url": "https://example.com/notify",
-            "payload": {"status": "delayed"}
+            "url": "https://hooks.slack.com/...",
+            "payload": {"text": "Job delayed until business hours"}
+          }
+        }
+      ]
+    },
+    {
+      "type": "other_job_running",
+      "name": "wait_for_etl",
+      "recheckOnRetry": true,
+      "config": {
+        "jobID": "data-import-etl",
+        "shouldBeRunning": false
+      },
+      "onViolation": [
+        {
+          "type": "delay",
+          "config": {
+            "duration": "5m"
           }
         }
       ],
@@ -217,24 +237,67 @@ Constraints are configured as JSON in the `Job.ConstraintConfig` field:
         {
           "type": "log",
           "config": {
-            "message": "Time window constraint satisfied"
+            "message": "ETL job not running, safe to proceed"
           }
         }
       ]
     },
     {
-      "type": "resource_available",
-      "name": "database_available",
+      "type": "other_job_completed_recently",
+      "name": "require_upstream_success",
       "recheckOnRetry": false,
       "config": {
-        "resourceType": "database",
-        "resourceID": "prod-db-1"
+        "jobID": "upstream-job",
+        "within": "30m",
+        "mustSucceed": true
       },
       "onViolation": [
         {
           "type": "fail",
           "config": {
-            "reason": "Database not available"
+            "reason": "Upstream job has not completed successfully in last 30m"
+          }
+        }
+      ]
+    },
+    {
+      "type": "max_runtime",
+      "name": "kill_on_timeout",
+      "recheckOnRetry": false,
+      "config": {
+        "maxDuration": "2h",
+        "checkInterval": "5m"
+      },
+      "onViolation": [
+        {
+          "type": "webhook",
+          "config": {
+            "url": "https://hooks.slack.com/...",
+            "payload": {"text": "Job exceeded 2h runtime limit"}
+          }
+        },
+        {
+          "type": "kill_job"
+        }
+      ]
+    },
+    {
+      "type": "http_health_check",
+      "name": "api_availability",
+      "recheckOnRetry": true,
+      "config": {
+        "url": "https://api.example.com/health?job={{.JobName}}",
+        "method": "GET",
+        "headers": {
+          "X-Run-ID": "{{.RunID}}"
+        },
+        "timeout": "5s"
+      },
+      "onViolation": [
+        {
+          "type": "fail",
+          "config": {
+            "reason": "API health check failed"
           }
         }
       ]
@@ -601,7 +664,7 @@ Makes an HTTP request to an endpoint and checks for a 200 response. Supports tem
 **Config:**
 ```json
 {
-  "url": "https://api.example.com/health",
+  "url": "https://api.example.com/health?job={{.JobName}}",
   "method": "GET",
   "headers": {
     "X-Job-Name": "{{.JobName}}",
@@ -615,13 +678,13 @@ Makes an HTTP request to an endpoint and checks for a 200 response. Supports tem
 **Implementation:**
 ```go
 type HTTPHealthCheckConstraint struct {
-    name           string
-    urlTemplate    *template.Template
-    method         string
+    name            string
+    urlTemplate     *template.Template
+    method          string
     headerTemplates map[string]*template.Template
-    bodyTemplate   *template.Template
-    timeout        time.Duration
-    recheck        bool
+    bodyTemplate    *template.Template
+    timeout         time.Duration
+    recheck         bool
 }
 
 func (h *HTTPHealthCheckConstraint) Check(ctx *ExecutionContext) (ConstraintResult, error) {
@@ -639,33 +702,42 @@ func (h *HTTPHealthCheckConstraint) Check(ctx *ExecutionContext) (ConstraintResu
     }
     url := urlBuf.String()
 
-    // Delegate HTTP request to webhook handler (or separate HTTP service)
-    request := &HTTPRequest{
-        URL:        url,
-        Method:     h.method,
-        Headers:    h.renderHeaders(data),
-        Body:       h.renderBody(data),
-        Timeout:    h.timeout,
-        ResponseTo: make(chan interface{}, 1),
+    // Render headers
+    headers := make(map[string]string)
+    for key, tmpl := range h.headerTemplates {
+        var buf bytes.Buffer
+        if err := tmpl.Execute(&buf, data); err != nil {
+            return ConstraintResult{}, err
+        }
+        headers[key] = buf.String()
     }
 
-    if err := ctx.SchedulerInbox.Send(request); err != nil {
+    // Make HTTP request directly
+    reqCtx, cancel := context.WithTimeout(ctx.Context, h.timeout)
+    defer cancel()
+
+    req, err := http.NewRequestWithContext(reqCtx, h.method, url, nil)
+    if err != nil {
         return ConstraintResult{}, err
     }
 
-    select {
-    case resp := <-request.ResponseTo:
-        httpResp := resp.(*HTTPResponse)
-        met := httpResp.StatusCode == 200
-
-        return ConstraintResult{
-            Met: met,
-            Message: fmt.Sprintf("HTTP %s %s returned %d",
-                h.method, url, httpResp.StatusCode),
-        }, nil
-    case <-ctx.Context.Done():
-        return ConstraintResult{}, ctx.Context.Err()
+    for key, value := range headers {
+        req.Header.Set(key, value)
     }
+
+    resp, err := ctx.HTTPClient.Do(req)
+    if err != nil {
+        return ConstraintResult{}, err
+    }
+    defer resp.Body.Close()
+
+    met := resp.StatusCode == 200
+
+    return ConstraintResult{
+        Met: met,
+        Message: fmt.Sprintf("HTTP %s %s returned %d",
+            h.method, url, resp.StatusCode),
+    }, nil
 }
 
 func (h *HTTPHealthCheckConstraint) EvaluationTiming() []EvaluationPhase {
@@ -813,68 +885,118 @@ type ConstraintConfig struct {
     OnMet          []actions.ActionConfig `json:"onMet"`
 }
 
-func parseConstraints(configData json.RawMessage) ([]ConstraintWithActions, error) {
-    var parsed struct {
-        Constraints []ConstraintConfig `json:"constraints"`
-    }
-
-    if err := json.Unmarshal(configData, &parsed); err != nil {
+// Load constraints from database for a job
+func LoadConstraintsForJob(database *db.DB, jobID string) ([]ConstraintWithActions, error) {
+    // Get all constraints for this job
+    dbConstraints, err := database.GetConstraintsByJob(jobID)
+    if err != nil {
         return nil, err
     }
 
-    result := make([]ConstraintWithActions, len(parsed.Constraints))
+    result := make([]ConstraintWithActions, len(dbConstraints))
 
-    for i, cc := range parsed.Constraints {
-        // Create constraint based on type
-        constraint, err := createConstraint(cc)
+    for i, dbConstraint := range dbConstraints {
+        // Get constraint type to determine how to parse
+        constraintType, err := database.GetConstraintType(dbConstraint.ConstraintTypeID)
         if err != nil {
             return nil, err
         }
 
-        // Create onViolation actions - delegated to actions module
-        onViolation := make([]Action, len(cc.OnViolation))
-        for j, ac := range cc.OnViolation {
-            action, err := actions.CreateAction(ac)
-            if err != nil {
-                return nil, err
-            }
-            onViolation[j] = action
+        // Create constraint instance based on type
+        constraint, err := createConstraintFromDB(&dbConstraint, constraintType)
+        if err != nil {
+            return nil, fmt.Errorf("failed to create constraint %s: %w", dbConstraint.ID, err)
         }
 
-        // Create onMet actions - delegated to actions module
-        onMet := make([]Action, len(cc.OnMet))
-        for j, ac := range cc.OnMet {
-            action, err := actions.CreateAction(ac)
+        // Get all actions for this constraint
+        dbActions, err := database.GetActionsByConstraint(dbConstraint.ID)
+        if err != nil {
+            return nil, err
+        }
+
+        // Separate actions by trigger type
+        var onViolation, onMet []Action
+        for _, dbAction := range dbActions {
+            actionType, err := database.GetActionType(dbAction.ActionTypeID)
             if err != nil {
                 return nil, err
             }
-            onMet[j] = action
+
+            action, err := actions.CreateActionFromDB(&dbAction, actionType)
+            if err != nil {
+                return nil, fmt.Errorf("failed to create action %s: %w", dbAction.ID, err)
+            }
+
+            switch dbAction.Trigger {
+            case "on_violated":
+                onViolation = append(onViolation, action)
+            case "on_met":
+                onMet = append(onMet, action)
+            }
         }
 
         result[i] = ConstraintWithActions{
             Constraint:     constraint,
             OnViolation:    onViolation,
             OnMet:          onMet,
-            RecheckOnRetry: cc.RecheckOnRetry,
+            RecheckOnRetry: parseRecheckOnRetry(dbConstraint.Config),
         }
     }
 
     return result, nil
 }
 
-func createConstraint(config ConstraintConfig) (Constraint, error) {
-    switch config.Type {
+func createConstraintFromDB(dbConstraint *db.Constraint, constraintType *db.ConstraintType) (Constraint, error) {
+    switch constraintType.Name {
     case "time_window":
-        return parseTimeWindowConstraint(config)
-    case "resource_available":
-        return parseResourceAvailableConstraint(config)
+        return parseTimeWindowConstraint(dbConstraint)
+    case "other_job_running":
+        return parseOtherJobRunningConstraint(dbConstraint)
+    case "other_job_completed_recently":
+        return parseOtherJobCompletedRecentlyConstraint(dbConstraint)
+    case "other_job_scheduled_soon":
+        return parseOtherJobScheduledSoonConstraint(dbConstraint)
+    case "http_health_check":
+        return parseHTTPHealthCheckConstraint(dbConstraint)
+    case "max_runtime":
+        return parseMaxRuntimeConstraint(dbConstraint)
+    case "min_runtime":
+        return parseMinRuntimeConstraint(dbConstraint)
     case "always_pass":
-        return &AlwaysPassConstraint{name: config.Name, recheck: config.RecheckOnRetry}, nil
+        return &AlwaysPassConstraint{name: dbConstraint.ID}, nil
     case "always_fail":
-        return &AlwaysFailConstraint{name: config.Name, recheck: config.RecheckOnRetry}, nil
+        return &AlwaysFailConstraint{name: dbConstraint.ID}, nil
     default:
-        return nil, fmt.Errorf("unknown constraint type: %s", config.Type)
+        return nil, fmt.Errorf("unknown constraint type: %s", constraintType.Name)
     }
+}
+
+// Example parser for TimeWindowConstraint
+func parseTimeWindowConstraint(dbConstraint *db.Constraint) (*TimeWindowConstraint, error) {
+    if dbConstraint.Config == nil {
+        return nil, fmt.Errorf("config required for time_window constraint")
+    }
+
+    var config struct {
+        StartTime string `json:"startTime"`
+        EndTime   string `json:"endTime"`
+        Timezone  string `json:"timezone"`
+    }
+
+    if err := json.Unmarshal([]byte(*dbConstraint.Config), &config); err != nil {
+        return nil, err
+    }
+
+    // Parse times and timezone
+    // ... implementation details
+
+    return &TimeWindowConstraint{
+        name:      dbConstraint.ID,
+        startTime: parsedStart,
+        endTime:   parsedEnd,
+        timezone:  tz,
+        recheck:   parseRecheckOnRetry(dbConstraint.Config),
+    }, nil
 }
 ```
 
@@ -1021,13 +1143,13 @@ func (o *Orchestrator) runContainerExited() {
 
 ## Scheduler Request/Response Messages
 
-Constraints communicate with the scheduler via typed request/response messages:
+Constraints query the scheduler for live job state via typed request/response messages. The scheduler maintains in-memory state and is the source of truth for job execution status.
 
 ```go
-// Job state query
+// Job state query - used to check if a job is running, when it last ran, when it runs next
 type JobStateRequest struct {
     JobID      string
-    ResponseTo chan<- interface{}
+    ResponseTo chan interface{}
 }
 
 type JobStateResponse struct {
@@ -1044,39 +1166,25 @@ type JobRunSummary struct {
     Success     bool
 }
 
-// Job history query
+// Job history query - used to get recent run history
 type JobHistoryRequest struct {
     JobID      string
     Limit      int
-    ResponseTo chan<- interface{}
+    ResponseTo chan interface{}
 }
 
 type JobHistoryResponse struct {
     JobID string
     Runs  []JobRunSummary
 }
-
-// HTTP request (delegated to HTTP service)
-type HTTPRequest struct {
-    URL        string
-    Method     string
-    Headers    map[string]string
-    Body       []byte
-    Timeout    time.Duration
-    ResponseTo chan<- interface{}
-}
-
-type HTTPResponse struct {
-    StatusCode int
-    Body       []byte
-    Error      error
-}
 ```
 
 The scheduler handles these requests by:
-1. Receiving the request message
-2. Querying its internal state or delegating to appropriate component
+1. Receiving the request message in its inbox
+2. Querying its internal in-memory state (scheduled runs index, running jobs map)
 3. Sending the response back on the provided channel
+
+**Note**: Constraints do NOT query the database for job state - the scheduler's in-memory state is the source of truth for what's currently running, scheduled, and recently completed.
 
 ## Future Extensions
 
