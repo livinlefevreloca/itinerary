@@ -345,141 +345,18 @@ func (a *AlwaysFailConstraint) Check(ctx context.Context) (ConstraintResult, err
 }
 ```
 
-## Action Types
-
-### 1. DelayAction
-
-Pauses execution for a specified duration.
-
-```go
-type DelayAction struct {
-    name     string
-    duration time.Duration
-}
-
-func (d *DelayAction) Execute(ctx *ExecutionContext) error {
-    ctx.Logger.Info("delaying execution",
-        "duration", d.duration,
-        "runID", ctx.RunID)
-
-    timer := time.NewTimer(d.duration)
-    defer timer.Stop()
-
-    select {
-    case <-timer.C:
-        return nil
-    case <-ctx.Context.Done():
-        return ctx.Context.Err()
-    }
-}
-
-func (d *DelayAction) Name() string {
-    return d.name
-}
-```
-
-### 2. WebhookAction
-
-Sends an HTTP webhook.
-
-```go
-type WebhookAction struct {
-    name    string
-    url     string
-    payload interface{}
-}
-
-func (w *WebhookAction) Execute(ctx *ExecutionContext) error {
-    ctx.Logger.Info("sending webhook",
-        "url", w.url,
-        "runID", ctx.RunID)
-
-    return ctx.WebhookHandler.SendWebhook(w.url, w.payload)
-}
-
-func (w *WebhookAction) Name() string {
-    return w.name
-}
-```
-
-### 3. LogAction
-
-Logs a message.
-
-```go
-type LogAction struct {
-    name    string
-    message string
-}
-
-func (l *LogAction) Execute(ctx *ExecutionContext) error {
-    ctx.Logger.Info(l.message,
-        "constraint_action", "log",
-        "runID", ctx.RunID)
-    return nil
-}
-
-func (l *LogAction) Name() string {
-    return l.name
-}
-```
-
-### 4. FailAction
-
-Forces the job run to fail immediately.
-
-```go
-type FailAction struct {
-    name   string
-    reason string
-}
-
-func (f *FailAction) Execute(ctx *ExecutionContext) error {
-    ctx.Logger.Error("failing job due to constraint action",
-        "reason", f.reason,
-        "runID", ctx.RunID)
-
-    return fmt.Errorf("job failed: %s", f.reason)
-}
-
-func (f *FailAction) Name() string {
-    return f.name
-}
-```
-
-### 5. NoOpAction (for testing)
-
-Does nothing - useful for testing.
-
-```go
-type NoOpAction struct {
-    name string
-}
-
-func (n *NoOpAction) Execute(ctx *ExecutionContext) error {
-    return nil
-}
-
-func (n *NoOpAction) Name() string {
-    return n.name
-}
-```
+**Note**: Action type implementations are defined in the `actions` module. See `/internal/actions/spec.md` for details on available action types and their configurations.
 
 ## Configuration Parsing
 
 ```go
 type ConstraintConfig struct {
-    Type           string          `json:"type"`
-    Name           string          `json:"name"`
-    RecheckOnRetry bool            `json:"recheckOnRetry"`
-    Config         json.RawMessage `json:"config"`
-    OnViolation    []ActionConfig  `json:"onViolation"`
-    OnMet          []ActionConfig  `json:"onMet"`
-}
-
-type ActionConfig struct {
-    Type   string          `json:"type"`
-    Config json.RawMessage `json:"config"`
+    Type           string                 `json:"type"`
+    Name           string                 `json:"name"`
+    RecheckOnRetry bool                   `json:"recheckOnRetry"`
+    Config         json.RawMessage        `json:"config"`
+    OnViolation    []actions.ActionConfig `json:"onViolation"`
+    OnMet          []actions.ActionConfig `json:"onMet"`
 }
 
 func parseConstraints(configData json.RawMessage) ([]ConstraintWithActions, error) {
@@ -500,20 +377,20 @@ func parseConstraints(configData json.RawMessage) ([]ConstraintWithActions, erro
             return nil, err
         }
 
-        // Create onViolation actions
+        // Create onViolation actions - delegated to actions module
         onViolation := make([]Action, len(cc.OnViolation))
         for j, ac := range cc.OnViolation {
-            action, err := createAction(ac)
+            action, err := actions.CreateAction(ac)
             if err != nil {
                 return nil, err
             }
             onViolation[j] = action
         }
 
-        // Create onMet actions
+        // Create onMet actions - delegated to actions module
         onMet := make([]Action, len(cc.OnMet))
         for j, ac := range cc.OnMet {
-            action, err := createAction(ac)
+            action, err := actions.CreateAction(ac)
             if err != nil {
                 return nil, err
             }
@@ -543,23 +420,6 @@ func createConstraint(config ConstraintConfig) (Constraint, error) {
         return &AlwaysFailConstraint{name: config.Name, recheck: config.RecheckOnRetry}, nil
     default:
         return nil, fmt.Errorf("unknown constraint type: %s", config.Type)
-    }
-}
-
-func createAction(config ActionConfig) (Action, error) {
-    switch config.Type {
-    case "delay":
-        return parseDelayAction(config)
-    case "webhook":
-        return parseWebhookAction(config)
-    case "log":
-        return parseLogAction(config)
-    case "fail":
-        return parseFailAction(config)
-    case "noop":
-        return &NoOpAction{name: "noop"}, nil
-    default:
-        return nil, fmt.Errorf("unknown action type: %s", config.Type)
     }
 }
 ```
@@ -633,9 +493,7 @@ Potential new constraint types:
 - `DependencyConstraint` - Checks if dependent jobs completed
 - `DataAvailableConstraint` - Checks if input data is ready
 - `QuotaConstraint` - Checks resource quotas
+- `RateLimitConstraint` - Enforces rate limits on job execution
+- `MaintenanceWindowConstraint` - Prevents execution during maintenance windows
 
-Potential new action types:
-- `SendEmailAction` - Sends email notification
-- `SlackAction` - Sends Slack message
-- `UpdateMetadataAction` - Updates job metadata
-- `TriggerJobAction` - Triggers another job
+For potential new action types, see `/internal/actions/spec.md`.

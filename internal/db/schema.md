@@ -22,13 +22,13 @@ The Itinerary database schema is designed to support job scheduling, constraint 
 │ PK id             │          │ PK id         │          │───────────│
 │ FK job_id         │          │    name       │          │ PK id     │
 │ FK constraint_    │          │    schedule   │          │    name   │
-│    type_id        │          │    pod_spec   │          │           │
+│       type_id     │          │    pod_spec   │          │           │
 │    config         │          │    created_at │          └─────┬─────┘
 │    created_at     │          │    updated_at │                │
 └────────┬──────────┘          └────────┬──────┘                │
-         │                              │                        │
-         │                              │ 1:Many                 │ Referenced by
-         │                              │                        │
+         │                              │                       │
+         │                              │ 1:Many                │ Referenced by
+         │                              │                       │
          │                     ┌────────▼───────┐               │
          │         ┌───────────┤ job_runs       │               │
          │         │           │────────────────│               │
@@ -47,24 +47,24 @@ The Itinerary database schema is designed to support job scheduling, constraint 
          │         │                   │                        │
          │         │ 1:Many            │ 1:Many                 │
          │         │                   │                        │
-┌────────▼─────────▼──┐       ┌────────▼────────┐              │
-│ actions             │       │constraint_runs  │              │
-│─────────────────────│       │─────────────────│              │
-│ PK id               │       │ PK id           │              │
-│ FK constraint_id    │       │ FK run_id       │              │
-│ FK action_type_id   │◄──┐   │ FK constraint_id│              │
-│    trigger          │   │   │    executed_at  │              │
-│    config           │   │   │    success      │              │
-│    created_at       │   │   │    violated     │              │
-└─────────────────────┘   │   │    in_error     │              │
-                          │   │    error        │              │
-                          │   │    details      │              │
-                          │   └───────┬─────────┘              │
-                          │           │                        │
-                          │           │ 1:Many                 │
-                          │           │                        │
-                          │   ┌───────▼──────────┐             │
-                          └───┤ action_runs      │◄────────────┘
+┌────────▼─────────▼──┐       ┌────────▼────────┐               │
+│ actions             │       │constraint_runs  │               │
+│─────────────────────│       │─────────────────│               │
+│ PK id               │       │ PK id           │               │
+│ FK constraint_id    │       │ FK run_id       │               │
+│ FK action_type_id   │◄──┐   │ FK constraint_id│               │
+│    trigger          │   │   │    executed_at  │               │
+│    config           │   │   │    success      │               │
+│    created_at       │   │   │    violated     │               │
+└─────────────────────┘   │   │    in_error     │               │
+                          │   │    error        │               │
+                          │   │    details      │               │
+                          │   └───────┬─────────┘               │
+                          │           │                         │
+                          │           │ 1:Many                  │
+                          │           │                         │
+                          │   ┌───────▼──────────┐              │
+                          └───┤ action_runs      │◄─────────────┘
                               │──────────────────│  Many:1
                               │ PK id            │
                               │ FK run_id        │
