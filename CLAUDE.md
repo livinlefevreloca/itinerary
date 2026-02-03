@@ -44,8 +44,15 @@ When implementing features for the Itinerary project, follow this strict procedu
 * Use clear, descriptive variable and function names
 * Add comments for complex logic
 * Keep functions small and focused
+* Add doc comments for all functions and types above the code
+* Dont add random markdown files with "reports" of changes strewn about the code
+
+### Changelog
+* Before each commit add updates the changelog detailing changes
+* these should be a consise summary of the changes you made not super long descriptions
 
 ### Testing Principles
+* Use mocks in test utils, dont add random mocks to test files. If the mock doesnt exist add it to the testtils module
 * **NO DEFENSIVE NIL CHECKS FOR TESTS**
 * Never add nil checks or defensive coding to production code just because tests create minimal structs
 * Instead, tests should create fully-formed instances with all required dependencies
