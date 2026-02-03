@@ -3,77 +3,17 @@ package constraints
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
 // ========================
 // Test Helpers and Mocks
 // ========================
-
-// MockSchedulerInbox for testing message sending to scheduler
-type MockSchedulerInbox struct {
-	messages       []interface{}
-	mu             sync.Mutex
-	responseFunc   func(msg interface{})
-	shouldError    bool
-	errorToReturn  error
-}
-
-func NewMockSchedulerInbox() *MockSchedulerInbox {
-	return &MockSchedulerInbox{
-		messages: []interface{}{},
-	}
-}
-
-func (m *MockSchedulerInbox) Send(msg interface{}) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.shouldError {
-		return m.errorToReturn
-	}
-
-	m.messages = append(m.messages, msg)
-
-	// Auto-respond if response function is set
-	if m.responseFunc != nil {
-		m.responseFunc(msg)
-	}
-
-	return nil
-}
-
-func (m *MockSchedulerInbox) GetMessages() []interface{} {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]interface{}{}, m.messages...)
-}
-
-func (m *MockSchedulerInbox) SetResponseFunc(f func(msg interface{})) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.responseFunc = f
-}
-
-func (m *MockSchedulerInbox) SetError(err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.shouldError = true
-	m.errorToReturn = err
-}
-
-// TestLogger for capturing log output
-func createTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
-}
 
 // NoOpAction is a test action that does nothing
 type NoOpAction struct {
@@ -97,9 +37,9 @@ func createTestExecutionContext() *ExecutionContext {
 	return &ExecutionContext{
 		Job:            &Job{ID: "test-job", Name: "test"},
 		RunID:          "test-run-id",
-		SchedulerInbox: NewMockSchedulerInbox(),
-		HTTPClient:     &http.Client{Timeout: 5 * time.Second},
-		Logger:         createTestLogger(),
+		SchedulerInbox: testutil.NewMockSchedulerInbox(),
+		HTTPClient:     testutil.CreateTestHTTPClient(),
+		Logger:         testutil.CreateTestSlogLogger(),
 		Context:        context.Background(),
 	}
 }
@@ -281,7 +221,7 @@ func TestOtherJobRunningConstraint_JobIsRunning(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with job running
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobStateRequest); ok {
 			req.ResponseTo <- &JobStateResponse{
@@ -323,7 +263,7 @@ func TestOtherJobRunningConstraint_JobIsNotRunning(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with job not running
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobStateRequest); ok {
 			req.ResponseTo <- &JobStateResponse{
@@ -351,7 +291,7 @@ func TestOtherJobRunningConstraint_ExpectRunning(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with job running
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobStateRequest); ok {
 			req.ResponseTo <- &JobStateResponse{
@@ -379,7 +319,7 @@ func TestOtherJobRunningConstraint_SchedulerError(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to return error
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetError(fmt.Errorf("scheduler unavailable"))
 
 	_, err := constraint.Check(ctx)
@@ -402,7 +342,7 @@ func TestOtherJobRunningConstraint_ContextCancelled(t *testing.T) {
 	ctx.Context = cancelCtx
 
 	// Setup mock to not respond (simulating slow response)
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		// Don't send response - let context cancellation happen
 	})
@@ -439,7 +379,7 @@ func TestOtherJobCompletedRecently_WithinWindow(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with run completed 15m ago
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobHistoryRequest); ok {
 			req.ResponseTo <- &JobHistoryResponse{
@@ -471,7 +411,7 @@ func TestOtherJobCompletedRecently_OutsideWindow(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with run completed 45m ago
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobHistoryRequest); ok {
 			req.ResponseTo <- &JobHistoryResponse{
@@ -503,7 +443,7 @@ func TestOtherJobCompletedRecently_MustSucceed_Success(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock with successful run
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobHistoryRequest); ok {
 			req.ResponseTo <- &JobHistoryResponse{
@@ -535,7 +475,7 @@ func TestOtherJobCompletedRecently_MustSucceed_Failed(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock with failed run
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobHistoryRequest); ok {
 			req.ResponseTo <- &JobHistoryResponse{
@@ -567,7 +507,7 @@ func TestOtherJobCompletedRecently_NoRuns(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock with no runs
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobHistoryRequest); ok {
 			req.ResponseTo <- &JobHistoryResponse{
@@ -614,7 +554,7 @@ func TestOtherJobScheduledSoon_ScheduledWithinWindow(t *testing.T) {
 
 	// Setup mock to respond with job scheduled in 5 minutes
 	nextRun := time.Now().Add(5 * time.Minute)
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobStateRequest); ok {
 			req.ResponseTo <- &JobStateResponse{
@@ -641,7 +581,7 @@ func TestOtherJobScheduledSoon_ScheduledOutsideWindow(t *testing.T) {
 
 	// Setup mock to respond with job scheduled in 30 minutes
 	nextRun := time.Now().Add(30 * time.Minute)
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobStateRequest); ok {
 			req.ResponseTo <- &JobStateResponse{
@@ -667,7 +607,7 @@ func TestOtherJobScheduledSoon_NoScheduledRun(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with no scheduled run
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobStateRequest); ok {
 			req.ResponseTo <- &JobStateResponse{
@@ -694,7 +634,7 @@ func TestOtherJobScheduledSoon_ScheduledInPast(t *testing.T) {
 
 	// Setup mock to respond with job scheduled in the past
 	nextRun := time.Now().Add(-5 * time.Minute)
-	mockInbox := ctx.SchedulerInbox.(*MockSchedulerInbox)
+	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		if req, ok := msg.(*JobStateRequest); ok {
 			req.ResponseTo <- &JobStateResponse{
@@ -733,7 +673,7 @@ func TestOtherJobScheduledSoon_EvaluationTiming(t *testing.T) {
 // ========================
 
 func TestHTTPHealthCheck_Success(t *testing.T) {
-	server := createTestHTTPServer(200, 0)
+	server := testutil.CreateTestHTTPServer(200, 0)
 	defer server.Close()
 
 	constraint, err := NewHTTPHealthCheckConstraint("health-check", server.URL, "GET", nil, "", 5*time.Second, false)
@@ -753,7 +693,7 @@ func TestHTTPHealthCheck_Success(t *testing.T) {
 }
 
 func TestHTTPHealthCheck_Failure(t *testing.T) {
-	server := createTestHTTPServer(500, 0)
+	server := testutil.CreateTestHTTPServer(500, 0)
 	defer server.Close()
 
 	constraint, err := NewHTTPHealthCheckConstraint("health-check", server.URL, "GET", nil, "", 5*time.Second, false)
@@ -773,7 +713,7 @@ func TestHTTPHealthCheck_Failure(t *testing.T) {
 }
 
 func TestHTTPHealthCheck_URLTemplating(t *testing.T) {
-	server := createTestHTTPServer(200, 0)
+	server := testutil.CreateTestHTTPServer(200, 0)
 	defer server.Close()
 
 	// Use template in URL
@@ -804,16 +744,16 @@ func TestHTTPHealthCheck_URLTemplating(t *testing.T) {
 func TestHTTPHealthCheck_HeaderTemplating(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check that header was set correctly
-		runID := r.Header.Get("X-Run-ID")
-		if runID != "test-run-id" {
-			t.Errorf("Expected X-Run-ID header to be 'test-run-id', got: %s", runID)
+		jobName := r.Header.Get("X-Job-Name")
+		if jobName != "test" {
+			t.Errorf("Expected X-Job-Name header to be 'test', got: %s", jobName)
 		}
 		w.WriteHeader(200)
 	}))
 	defer server.Close()
 
 	headers := map[string]string{
-		"X-Run-ID": "{{.RunID}}",
+		"X-Job-Name": "{{.JobName}}",
 	}
 
 	constraint, err := NewHTTPHealthCheckConstraint("health-check", server.URL, "GET", headers, "", 5*time.Second, false)
@@ -832,9 +772,220 @@ func TestHTTPHealthCheck_HeaderTemplating(t *testing.T) {
 	}
 }
 
+func TestHTTPHealthCheck_ArgsTemplating(t *testing.T) {
+	receivedURL := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedURL = r.URL.String()
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	// Use template with args
+	urlTemplate := server.URL + "/api?arg1={{index .Args 1}}&arg2={{index .Args 2}}"
+	constraint, err := NewHTTPHealthCheckConstraint("health-check", urlTemplate, "GET", nil, "", 5*time.Second, false)
+	if err != nil {
+		t.Fatalf("Failed to create constraint: %v", err)
+	}
+
+	ctx := createTestExecutionContext()
+	ctx.Job.Args = map[int]string{
+		1: "value1",
+		2: "value2",
+	}
+
+	result, err := constraint.Check(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.Met {
+		t.Errorf("Expected Met=true, got Met=false")
+	}
+
+	// Verify the args were templated correctly
+	if !contains(receivedURL, "arg1=value1") || !contains(receivedURL, "arg2=value2") {
+		t.Errorf("Expected URL to contain templated args, got: %s", receivedURL)
+	}
+}
+
+func TestHTTPHealthCheck_KwargsTemplating(t *testing.T) {
+	receivedURL := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedURL = r.URL.String()
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	// Use template with kwargs
+	urlTemplate := server.URL + "/api?name={{index .Kwargs \"name\"}}&port={{index .Kwargs \"port\"}}"
+	constraint, err := NewHTTPHealthCheckConstraint("health-check", urlTemplate, "GET", nil, "", 5*time.Second, false)
+	if err != nil {
+		t.Fatalf("Failed to create constraint: %v", err)
+	}
+
+	ctx := createTestExecutionContext()
+	ctx.Job.Kwargs = map[string]string{
+		"name": "myservice",
+		"port": "8080",
+	}
+
+	result, err := constraint.Check(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.Met {
+		t.Errorf("Expected Met=true, got Met=false")
+	}
+
+	// Verify the kwargs were templated correctly
+	if !contains(receivedURL, "name=myservice") || !contains(receivedURL, "port=8080") {
+		t.Errorf("Expected URL to contain templated kwargs, got: %s", receivedURL)
+	}
+}
+
+func TestHTTPHealthCheck_MixedTemplating(t *testing.T) {
+	receivedURL := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedURL = r.URL.String()
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	// Use template with job fields, args, and kwargs
+	urlTemplate := server.URL + "/jobs/{{.JobName}}?host={{index .Args 1}}&env={{index .Kwargs \"environment\"}}"
+	constraint, err := NewHTTPHealthCheckConstraint("health-check", urlTemplate, "GET", nil, "", 5*time.Second, false)
+	if err != nil {
+		t.Fatalf("Failed to create constraint: %v", err)
+	}
+
+	ctx := createTestExecutionContext()
+	ctx.Job.Name = "backup-job"
+	ctx.Job.Args = map[int]string{
+		1: "server1.example.com",
+	}
+	ctx.Job.Kwargs = map[string]string{
+		"environment": "production",
+	}
+
+	result, err := constraint.Check(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.Met {
+		t.Errorf("Expected Met=true, got Met=false")
+	}
+
+	// Verify all templating worked
+	if !contains(receivedURL, "/jobs/backup-job") {
+		t.Errorf("Expected URL to contain job info, got: %s", receivedURL)
+	}
+	if !contains(receivedURL, "host=server1.example.com") {
+		t.Errorf("Expected URL to contain arg, got: %s", receivedURL)
+	}
+	if !contains(receivedURL, "env=production") {
+		t.Errorf("Expected URL to contain kwarg, got: %s", receivedURL)
+	}
+}
+
+func TestHTTPHealthCheck_StartTimeTemplating(t *testing.T) {
+	receivedURL := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedURL = r.URL.String()
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	// Use template with StartTime
+	urlTemplate := server.URL + "/health?start={{.StartTime.Unix}}"
+	constraint, err := NewHTTPHealthCheckConstraint("health-check", urlTemplate, "GET", nil, "", 5*time.Second, false)
+	if err != nil {
+		t.Fatalf("Failed to create constraint: %v", err)
+	}
+
+	startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	ctx := createTestExecutionContextWithStartTime(startTime)
+
+	result, err := constraint.Check(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.Met {
+		t.Errorf("Expected Met=true, got Met=false")
+	}
+
+	// Verify StartTime was templated
+	expectedUnix := fmt.Sprintf("start=%d", startTime.Unix())
+	if !contains(receivedURL, expectedUnix) {
+		t.Errorf("Expected URL to contain StartTime unix timestamp, got: %s", receivedURL)
+	}
+}
+
+func TestHTTPHealthCheck_EndTimeTemplating(t *testing.T) {
+	receivedURL := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedURL = r.URL.String()
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	// Use template with EndTime
+	urlTemplate := server.URL + "/health?end={{.EndTime.Format \"2006-01-02T15:04:05Z07:00\"}}"
+	constraint, err := NewHTTPHealthCheckConstraint("health-check", urlTemplate, "GET", nil, "", 5*time.Second, false)
+	if err != nil {
+		t.Fatalf("Failed to create constraint: %v", err)
+	}
+
+	startTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	endTime := time.Date(2024, 1, 15, 10, 35, 0, 0, time.UTC)
+	ctx := createTestExecutionContextWithTiming(startTime, endTime, 0)
+
+	result, err := constraint.Check(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.Met {
+		t.Errorf("Expected Met=true, got Met=false")
+	}
+
+	// Verify EndTime was templated with correct format
+	if !contains(receivedURL, "end=2024-01-15T10:35:00Z") {
+		t.Errorf("Expected URL to contain formatted EndTime, got: %s", receivedURL)
+	}
+}
+
+func TestHTTPHealthCheck_TimingNotAvailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+
+	// Template tries to use StartTime but it's not available
+	urlTemplate := server.URL + "/health?job={{.JobName}}"
+	constraint, err := NewHTTPHealthCheckConstraint("health-check", urlTemplate, "GET", nil, "", 5*time.Second, false)
+	if err != nil {
+		t.Fatalf("Failed to create constraint: %v", err)
+	}
+
+	ctx := createTestExecutionContext()
+	// Don't set StartTime or EndTime
+
+	result, err := constraint.Check(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !result.Met {
+		t.Errorf("Expected Met=true (template doesn't require timing), got Met=false")
+	}
+}
+
 func TestHTTPHealthCheck_Timeout(t *testing.T) {
 	// Server with 5s delay
-	server := createTestHTTPServer(200, 5*time.Second)
+	server := testutil.CreateTestHTTPServer(200, 5*time.Second)
 	defer server.Close()
 
 	// Constraint with 100ms timeout
@@ -859,7 +1010,7 @@ func TestHTTPHealthCheck_Timeout(t *testing.T) {
 }
 
 func TestHTTPHealthCheck_ContextCancellation(t *testing.T) {
-	server := createTestHTTPServer(200, 5*time.Second)
+	server := testutil.CreateTestHTTPServer(200, 5*time.Second)
 	defer server.Close()
 
 	constraint, err := NewHTTPHealthCheckConstraint("health-check", server.URL, "GET", nil, "", 10*time.Second, false)
@@ -1343,9 +1494,9 @@ func TestConstraintChecker_SingleConstraintMet(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
@@ -1372,9 +1523,9 @@ func TestConstraintChecker_SingleConstraintViolated(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
@@ -1408,9 +1559,9 @@ func TestConstraintChecker_MultipleConstraintsAllMet(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
@@ -1444,9 +1595,9 @@ func TestConstraintChecker_MultipleConstraintsOneFails(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
@@ -1464,9 +1615,9 @@ func TestConstraintChecker_NoConstraints(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
@@ -1496,9 +1647,9 @@ func TestConstraintChecker_MultipleActionsOnViolation(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
@@ -1533,9 +1684,9 @@ func TestConstraintChecker_ShouldRecheckOnRetry_True(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	if !checker.ShouldRecheckOnRetry(&Job{ID: "test-job"}) {
@@ -1557,9 +1708,9 @@ func TestConstraintChecker_ShouldRecheckOnRetry_False(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	if checker.ShouldRecheckOnRetry(&Job{ID: "test-job"}) {
@@ -1572,9 +1723,9 @@ func TestConstraintChecker_ShouldRecheckOnRetry_NoConstraints(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	if checker.ShouldRecheckOnRetry(&Job{ID: "test-job"}) {
@@ -1604,9 +1755,9 @@ func TestConstraintChecker_CheckPreExecution_OnlyRunsPrePhase(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
@@ -1644,9 +1795,9 @@ func TestConstraintChecker_CheckDuringExecution_OnlyRunsDuringPhase(t *testing.T
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	result, err := checker.CheckDuringExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime)
@@ -1685,9 +1836,9 @@ func TestConstraintChecker_CheckPostExecution_OnlyRunsPostPhase(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	result, err := checker.CheckPostExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
@@ -1716,9 +1867,9 @@ func TestConstraintChecker_CheckDuringExecution_RequiresStartTime(t *testing.T) 
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	result, err := checker.CheckDuringExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime)
@@ -1743,9 +1894,9 @@ func TestConstraintChecker_CheckPostExecution_RequiresTiming(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
+		testutil.NewMockSchedulerInbox(),
 		&http.Client{},
-		createTestLogger(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	result, err := checker.CheckPostExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
@@ -1772,9 +1923,9 @@ func TestConstraintChecker_MultiplePhaseConstraint(t *testing.T) {
 
 	checker := NewConstraintChecker(
 		constraints,
-		NewMockSchedulerInbox(),
-		&http.Client{},
-		createTestLogger(),
+		testutil.NewMockSchedulerInbox(),
+		testutil.CreateTestHTTPClient(),
+		testutil.CreateTestSlogLogger(),
 	)
 
 	// Should run in pre-execution
@@ -1934,13 +2085,3 @@ func TestParseConstraints_UnknownConstraintType(t *testing.T) {
 	t.Skip("Configuration parsing not yet implemented")
 }
 
-// HTTP Test Server Helper
-func createTestHTTPServer(statusCode int, delay time.Duration) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if delay > 0 {
-			time.Sleep(delay)
-		}
-		w.WriteHeader(statusCode)
-		fmt.Fprint(w, `{"status":"ok"}`)
-	}))
-}

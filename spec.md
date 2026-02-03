@@ -53,14 +53,6 @@ itinerary/
 │       ├── spec.md              # Component specification
 │       └── test_spec.md         # Test specification
 │
-├── spec/                   # Specifications and UI mockups
-│   ├── components/         # Component specifications
-│   │   ├── syncer.md               # Syncer specification
-│   │   ├── stats-collector.md      # Stats Collector specification
-│   │   └── webhook-handler.md      # Webhook Handler specification
-│   ├── top.png             # UI mockups
-│   └── bottom.png
-│
 ├── spec.md                 # Overall architecture (this file)
 ├── go.mod                  # Module definition
 └── test.sh                 # Test runner script

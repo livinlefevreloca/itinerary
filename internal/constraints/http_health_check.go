@@ -66,9 +66,17 @@ func NewHTTPHealthCheckConstraint(
 func (h *HTTPHealthCheckConstraint) Check(ctx *ExecutionContext) (ConstraintResult, error) {
 	// Template data
 	data := map[string]interface{}{
-		"JobID":   ctx.Job.ID,
 		"JobName": ctx.Job.Name,
-		"RunID":   ctx.RunID,
+		"Args":    ctx.Job.Args,
+		"Kwargs":  ctx.Job.Kwargs,
+	}
+
+	// Add timing information if available
+	if ctx.StartTime != nil {
+		data["StartTime"] = *ctx.StartTime
+	}
+	if ctx.EndTime != nil {
+		data["EndTime"] = *ctx.EndTime
 	}
 
 	// Execute URL template

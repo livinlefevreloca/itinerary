@@ -77,8 +77,10 @@ type MessageSender interface {
 
 // Job represents a job definition (simplified for constraints module)
 type Job struct {
-	ID   string
-	Name string
+	ID     string
+	Name   string
+	Args   map[int]string    // 1-indexed positional arguments
+	Kwargs map[string]string // keyword arguments (flag name -> value)
 }
 
 // JobStateRequest queries the scheduler for job state

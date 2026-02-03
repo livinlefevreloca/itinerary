@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"sync"
 	"time"
 )
@@ -376,4 +379,85 @@ func WaitFor(t TestingT, condition func() bool, timeout time.Duration, msgAndArg
 type TestingT interface {
 	Errorf(format string, args ...interface{})
 	Fatalf(format string, args ...interface{})
+}
+
+// MockSchedulerInbox for testing message sending to scheduler
+type MockSchedulerInbox struct {
+	messages      []interface{}
+	mu            sync.Mutex
+	responseFunc  func(msg interface{})
+	shouldError   bool
+	errorToReturn error
+}
+
+func NewMockSchedulerInbox() *MockSchedulerInbox {
+	return &MockSchedulerInbox{
+		messages: []interface{}{},
+	}
+}
+
+func (m *MockSchedulerInbox) Send(msg interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.shouldError {
+		return m.errorToReturn
+	}
+
+	m.messages = append(m.messages, msg)
+
+	// Auto-respond if response function is set
+	if m.responseFunc != nil {
+		m.responseFunc(msg)
+	}
+
+	return nil
+}
+
+func (m *MockSchedulerInbox) GetMessages() []interface{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]interface{}{}, m.messages...)
+}
+
+func (m *MockSchedulerInbox) SetResponseFunc(f func(msg interface{})) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.responseFunc = f
+}
+
+func (m *MockSchedulerInbox) SetError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.shouldError = true
+	m.errorToReturn = err
+}
+
+func (m *MockSchedulerInbox) ClearMessages() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.messages = []interface{}{}
+}
+
+// CreateTestSlogLogger creates a simple slog logger for testing that writes to stderr
+func CreateTestSlogLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+}
+
+// CreateTestHTTPClient creates a standard HTTP client for testing
+func CreateTestHTTPClient() *http.Client {
+	return &http.Client{Timeout: 5 * time.Second}
+}
+
+// CreateTestHTTPServer creates an HTTP test server with configurable response
+func CreateTestHTTPServer(statusCode int, delay time.Duration) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		w.WriteHeader(statusCode)
+		fmt.Fprint(w, `{"status":"ok"}`)
+	}))
 }
