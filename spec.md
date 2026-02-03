@@ -17,299 +17,567 @@ The project follows canonical Go project layout:
 ```
 itinerary/
 ├── cmd/
-│   └── itinerary/           # Main application entry point
-│       └── main.go          # Server/CLI entry point
+│   └── itinerary/           # Main application entry point (planned)
+│       └── main.go          # Server entry point
 │
 ├── internal/                # Private application packages
-│   ├── actions/            # Action execution (webhooks, retries, etc.)
+│   ├── actions/            # Action execution system
 │   │   └── spec.md              # Component specification
 │   ├── config/             # Configuration management
+│   │   └── config.go            # Config loading and validation
 │   ├── constraints/        # Constraint evaluation system
 │   │   ├── spec.md              # Component specification
-│   │   └── test_spec.md         # Test specification
+│   │   ├── test_spec.md         # Test specification
+│   │   ├── types.go             # Core interfaces and types
+│   │   ├── checker.go           # ConstraintChecker implementation
+│   │   ├── time_window.go       # TimeWindowConstraint
+│   │   ├── other_job_*.go       # Job dependency constraints
+│   │   ├── http_health_check.go # HTTPHealthCheckConstraint
+│   │   ├── max_runtime.go       # MaxRuntimeConstraint
+│   │   ├── min_runtime.go       # MinRuntimeConstraint
+│   │   └── always_*.go          # Testing constraints
 │   ├── cron/               # Cron expression parser
 │   │   ├── spec.md              # Component specification
-│   │   └── test_spec.md         # Test specification
+│   │   ├── test_spec.md         # Test specification
+│   │   └── *.go                 # Parser and calculator implementation
 │   ├── db/                 # Database abstraction and operations
 │   │   ├── spec.md              # Component specification
-│   │   └── test_spec.md         # Test specification
-│   ├── inbox/              # Generic inbox for component communication
+│   │   ├── test_spec.md         # Test specification
+│   │   └── *.go                 # DB interface, queries, schema
+│   ├── inbox/              # Generic typed inbox for communication
+│   │   └── inbox.go             # Inbox implementation
 │   ├── orchestrator/       # Job run lifecycle management
 │   │   ├── spec.md              # Component specification
-│   │   └── test_spec.md         # Test specification
+│   │   ├── test_spec.md         # Test specification
+│   │   └── *.go                 # Orchestrator state machine
 │   ├── scheduler/          # Central scheduler component
 │   │   ├── spec.md              # Component specification
 │   │   ├── test_spec.md         # Test specification
-│   │   └── index/          # Scheduled run index (lock-free atomic)
+│   │   ├── scheduler.go         # Main scheduler loop
+│   │   ├── config.go            # Scheduler configuration
+│   │   ├── messages.go          # Inbox message types
+│   │   ├── types.go             # Orchestrator state types
+│   │   ├── job_state_syncer.go  # Database write buffering
+│   │   └── index/               # Scheduled run index (lock-free atomic)
 │   │       ├── spec.md              # Component specification
-│   │       └── test_spec.md         # Test specification
+│   │       ├── test_spec.md         # Test specification
+│   │       ├── index.go             # Index implementation
+│   │       └── scheduled_run.go     # ScheduledRun type
 │   ├── stats/              # Stats collector component
 │   │   ├── spec.md              # Component specification
-│   │   └── test_spec.md         # Test specification
+│   │   ├── test_spec.md         # Test specification
+│   │   └── *.go                 # Stats collector and accumulators
 │   └── testutil/           # Shared test utilities and mocks
+│       └── *.go                 # Mock implementations
 │
 ├── tools/                  # Standalone tools
 │   └── migrator/           # Database migration tool
 │       ├── spec.md              # Component specification
-│       └── test_spec.md         # Test specification
+│       └── *.go                 # Migration logic (planned)
 │
 ├── spec.md                 # Overall architecture (this file)
+├── CLAUDE.md               # Development process guide
 ├── go.mod                  # Module definition
+├── go.sum                  # Dependency checksums
 └── test.sh                 # Test runner script
 ```
 
 All application code lives in `internal/` (not meant for external import). The `cmd/` directory contains executable entry points. Standalone tools live in `tools/`. Components are organized by functionality with specifications and test files co-located alongside implementation.
 
 ## Scheduler Components
-This section defines the components of the scheduler and how they fit together. Each component is documented in detail in the `spec/components/` directory.
+This section defines the components of the scheduler and how they fit together. Each component is documented in detail in its respective spec file within `internal/`.
 
 ### Component Overview
-- **Central Scheduler**: Event loop that coordinates all scheduling activity
-- **Orchestrator**: Manages individual job run lifecycle
-- **Syncer**: Manages database writes for job execution data (job runs, constraint violations, action runs)
-- **Stats Collector**: Centralizes statistics collection and database persistence
-- **Webhook Handler**: Handles all webhook deliveries asynchronously
+- **Central Scheduler** (`internal/scheduler`): Event loop that coordinates all scheduling activity
+- **Scheduled Run Index** (`internal/scheduler/index`): Lock-free atomic index for time-ordered job run scheduling
+- **Job State Syncer** (`internal/scheduler`): Manages database writes for job execution data
+- **Orchestrator** (`internal/orchestrator`): Manages individual job run lifecycle
+- **Constraint Checker** (`internal/constraints`): Evaluates pre-execution, during-execution, and post-execution constraints
+- **Actions** (`internal/actions`): Executes actions when constraints are met or violated
+- **Stats Collector** (`internal/stats`): Centralizes statistics collection and database persistence
+- **Cron Parser** (`internal/cron`): Parses cron expressions and calculates scheduled run times
+- **Database Layer** (`internal/db`): Provides database abstraction and operations
+- **Inbox** (`internal/inbox`): Generic typed inbox for inter-component communication
+- **Config** (`internal/config`): Configuration management
 
-### Central scheduler
-The central scheduler is the heart of the application and operates as an event loop.
+### Central Scheduler
+The central scheduler (`internal/scheduler`) is the heart of the application and operates as an event loop. See `internal/scheduler/spec.md` for implementation details.
 
 #### Core Principles
 * **Single Source of Truth**: The main loop owns all scheduling state. Any component that needs state must send a request to the inbox and wait for a response.
 * **No I/O in Loop**: The loop never performs I/O operations. All external communication is delegated to other goroutines.
+* **Lock-Free Design**: Uses atomic pointer swapping for the scheduled run index to avoid lock contention.
 * **Request/Response Pattern**: Components communicate with the loop via inbox messages that can include response channels.
+
+#### Components
+* **Scheduler**: Main event loop that coordinates all activity
+* **Inbox**: Typed buffered channel for inter-component messages with timeout support
+* **Job State Syncer**: Buffers and flushes job run updates and stats to database
+* **Index Builder**: Background goroutine that periodically rebuilds the scheduled run index
 
 #### Startup
 * Load configuration (intervals, windows, etc.)
-* Load job definitions from database (read-only connection)
+* Load job definitions from database
 * Build initial ScheduledRunIndex
 * Initialize state:
   - Active orchestrators map (runID → orchestrator state)
-  - Inbox (buffered channel for events)
+  - Inbox (buffered channel for messages)
+  - Job State Syncer (for database writes)
   - Shutdown signal channel
+* Start background goroutines:
+  - Index builder goroutine
+  - Job State Syncer goroutines (flushers and syncers)
 
 #### Configuration Parameters
-* **PRE_SCHEDULE_INTERVAL**: Time before a job starts to launch its orchestrator (default: 10 seconds, configurable)
-* **INDEX_REBUILD_INTERVAL**: How often to rebuild the index (default: 1 minute, configurable, must be < LOOKAHEAD_WINDOW)
-* **LOOKAHEAD_WINDOW**: How far ahead to calculate runs (default: 10 minutes, configurable)
-* **GRACE_PERIOD**: How far back to include runs in index to catch near-misses (default: 30 seconds, configurable)
-* **LOOP_INTERVAL**: How often the main loop runs (default: 1 second)
+* **PreScheduleInterval**: Time before a job starts to launch its orchestrator (default: 10 seconds)
+* **IndexRebuildInterval**: How often to rebuild the index (default: 1 minute, must be < LookaheadWindow)
+* **LookaheadWindow**: How far ahead to calculate runs (default: 10 minutes)
+* **GracePeriod**: How far back to include runs in index to catch near-misses (default: 30 seconds)
+* **LoopInterval**: How often the main loop runs (default: 1 second)
+* **InboxBufferSize**: Size of inbox buffer (default: 10,000)
+* **InboxSendTimeout**: Timeout for sending to inbox (default: 5 seconds)
+* **OrchestratorHeartbeatInterval**: How often orchestrators send heartbeats (default: 10 seconds)
+* **MaxMissedOrchestratorHeartbeats**: Number of missed heartbeats before marking orphaned (default: 3)
 
 #### Main Loop Iteration
-Each iteration processes:
+Each iteration processes (see `internal/scheduler/spec.md` for implementation details):
 
 1. **Check for shutdown signal**
    - If received, cancel all active orchestrators and exit gracefully
 
-2. **Rebuild index if needed**
-   - If (now - lastRebuild) > INDEX_REBUILD_INTERVAL
-   - Generate runs for window: (now - GRACE_PERIOD, now + LOOKAHEAD_WINDOW)
-   - Atomically swap index
-   - No I/O - uses in-memory job list
-
-3. **Schedule new orchestrators**
-   - Query index for jobs in (now, now + PRE_SCHEDULE_INTERVAL)
+2. **Schedule new orchestrators**
+   - Query index for jobs in (now, now + PreScheduleInterval)
    - For each run not in activeOrchestrators map:
-     - Generate unique runID
+     - Generate deterministic runID (format: "jobID:unixTimestamp")
      - Launch orchestrator goroutine
      - Record in activeOrchestrators[runID] with metadata
-   - No I/O - just goroutine spawning
+     - Buffer job run update to syncer
+   - No I/O - just goroutine spawning and memory operations
 
-4. **Process all inbox messages**
-   - Handle every message in the inbox (not priority-based)
+3. **Process all inbox messages**
+   - Handle every message in the inbox (non-blocking, drains all available)
    - Message types:
-     - State queries (respond with current state)
-     - Cancellation requests (signal orchestrator)
-     - Orchestrator completion notifications
-     - Schedule update notifications (trigger rebuild)
-     - Stats requests
+     - OrchestratorHeartbeat: Update heartbeat tracking
+     - OrchestratorStateChange: Update orchestrator status
+     - OrchestratorComplete/Failed: Mark terminal state
+     - CancelRun: Signal orchestrator cancellation
+     - UpdateRunConfig: Update job config while in PreRun
+     - GetOrchestratorState: Return orchestrator state
+     - GetAllActiveRuns: Return all active orchestrators
+     - GetStats: Return scheduler statistics
+     - Shutdown: Trigger graceful shutdown
    - Messages may include response channels for request/response pattern
+
+4. **Check for missed heartbeats**
+   - For each non-terminal orchestrator:
+     - Check time since last heartbeat
+     - Increment missed heartbeat counter if overdue
+     - Mark as orphaned if missed count exceeds threshold
 
 5. **Clean up completed orchestrators**
    - Remove entries from activeOrchestrators where:
-     - Orchestrator has completed AND
-     - now > startTime + GRACE_PERIOD
+     - Orchestrator is in terminal state (Completed, Failed, Cancelled, Orphaned) AND
+     - now > scheduledAt + GracePeriod
    - This prevents re-running fast jobs that complete within grace period
 
-6. **Record state changes**
-   - Collect all state changes from this iteration
-   - Send to syncer goroutine for database persistence
-   - No I/O in main loop - syncer handles writes
+6. **Record iteration statistics**
+   - Buffer iteration stats (duration, active count, inbox depth, messages processed)
+   - Syncer automatically flushes based on size/time thresholds
 
-7. **Update statistics**
-   - Track loop iteration metrics
-   - Send to Stats Collector via its inbox
+7. **Update inbox depth stats**
+   - Track current inbox depth and maximum seen
+
+#### Background Goroutines
+The scheduler runs several background goroutines:
+
+1. **Index Builder** (`runIndexBuilder`):
+   - Runs on IndexRebuildInterval ticker (default: 1 minute)
+   - Queries database for all job definitions
+   - Generates scheduled runs for window: (now - GracePeriod, now + LookaheadWindow)
+   - Sorts runs by (ScheduledAt, JobID)
+   - Atomically swaps index pointer (lock-free)
+   - Can be triggered manually via rebuildIndexChan
+
+2. **Job State Syncer Goroutines** (4 total):
+   - **Job Run Flusher**: Periodically flushes buffered job run updates (time-based)
+   - **Stats Flusher**: Periodically flushes buffered iteration stats (time-based)
+   - **Job Run Syncer**: Reads from job run channel and writes to database
+   - **Stats Syncer**: Reads from stats channel and writes to database
+   - Dual trigger mechanism: size threshold OR time interval triggers flush
+
+3. **Orchestrator Goroutines** (one per active job run):
+   - Manage individual job run lifecycle
+   - Send heartbeats on OrchestratorHeartbeatInterval
+   - Send state change messages to inbox
+   - Can receive cancellation signals and config updates
 
 #### State Management
 The main loop maintains:
-* **activeOrchestrators**: Map of runID → orchestrator metadata
-  - Includes: jobID, scheduledTime, actualStartTime, status, cancel channel
-  - Entries removed only after completion AND grace period expiration
-* **jobDefinitions**: In-memory copy of all job schedules
-* **index**: ScheduledRunIndex for efficient time-based queries
-* **stats**: Current iteration statistics
+* **activeOrchestrators**: Map of runID → OrchestratorState
+  - Includes: jobID, jobConfig, scheduledAt, actualStart, status, cancelChan, configUpdate channel
+  - Also tracks: completedAt, lastHeartbeat, missedHeartbeats
+  - Entries removed only after reaching terminal state AND grace period expiration
+* **index**: Atomic pointer to ScheduledRunIndex for lock-free time-based queries
+* **inbox**: Typed inbox for inter-component messages
+* **syncer**: Job State Syncer for buffered database writes
 
 #### Orchestrator Lifecycle
-1. Main loop creates orchestrator goroutine
-2. Orchestrator runs (pre-exec, exec, post-exec phases)
-3. Orchestrator sends completion message to inbox
-4. Main loop marks as completed in activeOrchestrators
-5. After GRACE_PERIOD expires, main loop removes from map
+1. Main loop queries index for jobs to schedule
+2. Main loop creates OrchestratorState and launches orchestrator goroutine
+3. Orchestrator progresses through state machine:
+   - PreRun → Pending → ConditionPending → ConditionRunning → ContainerCreating → Running → Terminating → Completed/Failed
+4. Orchestrator sends heartbeats and state changes to inbox
+5. Main loop updates orchestrator state based on messages
+6. On terminal state, entry remains in map for GracePeriod
+7. After grace period expires, main loop removes from map
 
 #### Communication Patterns
-* **External → Loop**: Watcher goroutine receives gRPC requests, sends to inbox
-* **Loop → Orchestrators**: Via cancel channels
-* **Orchestrators → Loop**: Via inbox messages (completion, errors)
-* **Loop → Syncer**: Via syncer inbox channel (job run updates)
-* **Orchestrators → Syncer**: Via syncer inbox channel (job run updates, constraint violations, action runs)
+* **External → Loop**: API/CLI sends messages to inbox (via watcher goroutine)
+* **Loop → Orchestrators**: Via cancel channels and config update channels
+* **Orchestrators → Loop**: Via inbox messages (heartbeats, state changes, completion)
+* **Loop → Job State Syncer**: Buffer job run updates and stats
+* **Orchestrators → Job State Syncer**: Via syncer methods (buffer updates)
 * **Loop → Stats Collector**: Via stats collector inbox (scheduler stats)
 * **Orchestrators → Stats Collector**: Via stats collector inbox (orchestrator stats)
-* **Orchestrators → Webhook Handler**: Via webhook handler inbox (webhook requests)
-* **Syncer → Stats Collector**: Via stats collector inbox (syncer stats)
-* **Webhook Handler → Stats Collector**: Via stats collector inbox (webhook stats)
+* **Job State Syncer → Stats Collector**: Via stats collector inbox (syncer stats)
 * **Loop → External**: Via response channels in inbox messages
 
 
 ### Orchestrator
-* An orchestrator is a go routine that is responsible for a given run of a given job.
-* It is passed the required information about the job and starts its pre execution loop. This involves
-  - checking for cancel notifications from the main loop
-  - checking if the starttime has passed
-  - checking for a global shutdown signal
-* Once starttime has passed it evaluates pre-execution constraints (maxConcurrentRuns, preRunHook, requirePreviousSuccess)
-* If constraints are satisfied it starts the job execution
-* After that it starts its execution loop within the execution loop it:
-  - waits on kubernetes events from the job it started with a timeout
-  - checks execution-time constraints (maxExpectedRunTime, maxAllowedRunTime)
-  - takes built-in actions if constraints are violated (retry, webhook, kill)
-* Throughout execution, orchestrator records events to Syncer:
-  - Job run state changes (started, running, completed)
-  - Constraint violations (when constraints fail)
-  - Action runs (when actions are executed with success/failure)
-* Once the job is done if it has failed we notify the main loop, record the failure and exit
-* Once the job concludes if successful we evaluate post-execution constraints (postRunHook)
-* Actions are taken by:
-  - Sending messages to the main loop (kill instances, skip next run)
-  - Sending webhook requests to Webhook Handler (asynchronous, non-blocking)
-  - Direct actions by orchestrator (retry, start another job)
-* On completion, orchestrator sends final job run update to Syncer and stats to Stats Collector
+The orchestrator (`internal/orchestrator`) manages the complete lifecycle of a single job run. See `internal/orchestrator/spec.md` for full implementation details.
+
+#### State Machine
+Orchestrators follow a strict state machine with well-defined transitions:
+* **Pre-execution states**: PreRun, Pending, ConditionPending, ConditionRunning, ActionPending, ActionRunning
+* **Execution states**: ContainerCreating, Running, Terminating
+* **Retry state**: Retrying
+* **Terminal states**: Completed, Failed, Cancelled, Orphaned
+
+All state transitions are validated through an allowed transitions map to prevent invalid states.
+
+#### Lifecycle Phases
+1. **PreRun Phase**
+   - Wait for scheduled time to arrive
+   - Send periodic heartbeats to scheduler
+   - Handle config updates via configUpdate channel
+   - Handle cancellation via cancelChan
+
+2. **Pre-Execution Constraint Phase**
+   - Transition: Pending → ConditionPending → ConditionRunning
+   - Call constraintChecker.CheckPreExecution()
+   - Constraint checker internally evaluates all constraints and executes associated actions
+   - Returns ConstraintCheckResult with ShouldProceed boolean
+   - If constraints not met, may transition to Failed or Retrying
+
+3. **Execution Phase**
+   - Transition: ContainerCreating → Running → Terminating
+   - Create Kubernetes Job resource with pod spec
+   - Monitor pod status via Kubernetes API
+   - Send periodic heartbeats
+   - Handle cancellation at any point
+
+4. **Post-Execution Phase**
+   - Transition: Terminating → Completed/Failed/Retrying
+   - Retrieve pod logs and exit code
+   - Call constraintChecker.CheckPostExecution()
+   - Determine final state based on exit code and constraints
+
+5. **Retry Phase** (if configured)
+   - Transition: Failed → Retrying → Pending or ConditionPending
+   - Check retry configuration (max retries, backoff)
+   - Ask constraint checker: ShouldRecheckOnRetry()
+   - If yes: transition to ConditionPending (re-check constraints)
+   - If no: transition to Pending (skip constraint re-check)
+
+#### Communication
+* **Heartbeats**: Sent on OrchestratorHeartbeatInterval to prove liveness
+* **State Changes**: Sent to scheduler inbox to update orchestrator state
+* **Completion**: Final message with success/failure and error details
+* **Database Updates**: Buffer job run updates via Job State Syncer
+* **Statistics**: Send orchestrator metrics to Stats Collector on completion
+
+#### Constraint and Action Integration
+* Orchestrators delegate constraint evaluation to ConstraintChecker interface
+* ConstraintChecker internally handles action execution for onViolation/onMet triggers
+* Orchestrator only receives ShouldProceed boolean - all complexity is encapsulated
+* See `internal/constraints/spec.md` for constraint implementation details
+* See `internal/actions/spec.md` for action implementation details
 
 
-### Syncer
-* The syncer is the component responsible for writing job execution data to the database
-* See detailed specification: `spec/components/syncer.md`
-* Unlike the Stats Collector (which handles statistics), the Syncer handles transactional job execution data
-* It operates with an inbox-based architecture, blocking on incoming messages
-* The syncer handles three types of database writes:
-  - **Job run updates**: State changes, start/end times, success/failure status
-  - **Constraint violations**: Records when constraints are violated (separate from action_taken)
-  - **Action runs**: Records when actions are executed (retry, webhook, kill, skip) with success/failure
-* Architecture:
-  - Inbox-based communication (buffered channel)
-  - Blocks on inbox waiting for messages
-  - Independent batches for each message type
-  - Flushes based on size threshold OR time interval (dual trigger per type)
-  - Backpressure handling (blocks senders when overloaded)
-* The syncer uses buffering to reduce database contention:
-  - Batches updates by type (job runs, violations, actions)
-  - Uses transactions for atomic multi-row updates
-  - Different flush thresholds for different message types
-* Benefits:
-  - No I/O in scheduler loop or orchestrators
-  - Efficient batched database writes
-  - Guaranteed delivery (no data loss)
-  - Clear backpressure signals
-* On shutdown, the syncer flushes all pending updates before exiting
+### Job State Syncer
+The Job State Syncer (`internal/scheduler/job_state_syncer.go`) is responsible for buffering and persisting job execution data and scheduler statistics to the database. It is part of the scheduler package.
+
+#### Architecture
+* **Two-stage buffering**: In-memory buffers → channels → database writers
+* **Dual trigger flushing**: Size threshold OR time interval triggers flush
+* **Four background goroutines**:
+  - Job Run Flusher: Time-based flushing of buffered job run updates
+  - Stats Flusher: Time-based flushing of buffered iteration stats
+  - Job Run Syncer: Reads from job run channel and writes to database
+  - Stats Syncer: Reads from stats channel and writes to database
+
+#### Data Types
+* **Job Run Updates**: State changes, start/end times, success/failure status
+  - UpdateID: UUID for idempotent database writes
+  - RunID: Deterministic format "jobID:unixTimestamp"
+  - Status, timestamps, success flag, error message
+* **Scheduler Iteration Stats**: Per-iteration metrics
+  - Timestamp, duration, active orchestrator count
+  - Index size, inbox depth, messages processed
+
+#### Flush Configuration
+* **Job Run Updates**:
+  - Channel size: 200 (default)
+  - Flush threshold: 100 updates (size-based trigger)
+  - Flush interval: 1 second (time-based trigger)
+  - Maximum buffered: 10,000 (safety limit)
+* **Iteration Stats**:
+  - Channel size: 100 (default)
+  - Flush threshold: 30 stats (size-based trigger)
+  - Flush interval: 30 seconds (time-based trigger)
+
+#### Benefits
+* No I/O in scheduler main loop
+* Efficient batched database writes
+* Reduced database contention
+* Bounded memory usage
+* Backpressure handling (scheduler stops if buffer exceeds maximum)
+
+#### Graceful Shutdown
+1. Signal shutdown to stop flushers
+2. Final flush of remaining buffered items
+3. Close write channels
+4. Wait for syncers to drain channels and exit
+5. All pending data is persisted before shutdown completes
 
 ### Stats Collector
-* The Stats Collector is a standalone component that centralizes all statistics collection and database writing
-* See high-level specification: `spec/components/stats-collector.md`
-* See implementation specification: `internal/stats/spec.md`
-* See test specification: `internal/stats/test_spec.md`
-* Key responsibilities:
-  - Receive statistics from all components (scheduler, orchestrators, syncer, webhook handler)
-  - Perform intermediate calculations and aggregations
-  - Write statistics to database in batches
-  - Track statistics periods (time-based windows)
-* Architecture:
-  - Inbox-based communication (buffered channel)
-  - Blocks on inbox waiting for stats messages
-  - Flushes to database on threshold or timer
-  - Graceful shutdown with pending stats flush
-* Benefits:
-  - Centralizes all stats logic
-  - No stats-related I/O in other components
-  - Consistent aggregation and calculations
-  - Easy to add new metrics
+The Stats Collector (`internal/stats`) is a standalone component that centralizes all statistics collection and database writing. See `internal/stats/spec.md` for full implementation details.
 
-### Webhook Handler
-* The Webhook Handler is a standalone component that handles all webhook deliveries
-* See detailed specification: `spec/components/webhook-handler.md`
-* Key responsibilities:
-  - Receive webhook requests from orchestrators and other components
-  - Send HTTP requests to configured webhook endpoints
-  - Implement retry logic with exponential backoff
-  - Track webhook delivery statistics
-  - Support multiple webhook types (Slack, New Relic, PagerDuty, custom)
-* Architecture:
-  - Inbox-based communication (buffered channel)
-  - Blocks on inbox waiting for webhook requests
-  - Asynchronous delivery (doesn't block senders)
-  - Concurrent delivery with configurable limits
-  - Rate limiting to protect external services
-* Benefits:
-  - Orchestrators don't block on webhook delivery
-  - Centralized retry and error handling
-  - Unified webhook statistics
-  - Easy to add new webhook integrations
+#### Architecture
+* **Inbox-based communication**: Buffered channel for stats messages
+* **Stats period tracking**: Time-based windows for aggregation
+* **Accumulators**: Per-component stats accumulators that perform intermediate calculations
+* **Main loop**: Blocks on inbox, routes messages to appropriate accumulator
+
+#### Stats Sources
+* **Scheduler**: Iteration metrics, active orchestrator count, inbox depth
+* **Orchestrators**: Runtime, constraints checked, actions taken (per run)
+* **Job State Syncer**: Write metrics, buffer sizes, queue depths
+* **Stats Collector itself**: Self-monitoring (messages processed, flush count, etc.)
+
+#### Configuration
+* **InboxBufferSize**: 1000 (default)
+* **InboxSendTimeout**: 5 seconds (default)
+* **FlushInterval**: 30 seconds (default, time-based trigger)
+* **FlushThreshold**: 100 messages (default, size-based trigger)
+* **StatsPeriodDuration**: 30 seconds (default, window size)
+
+#### Accumulators
+Each accumulator:
+* Receives stats data via main loop routing
+* Performs aggregations (sums, min/max/avg calculations)
+* Tracks samples for statistical calculations
+* Flushes to database on period completion or threshold
+* Resets after successful flush
+
+#### Database Writes
+* **scheduler_stats**: Per-period scheduler metrics
+* **orchestrator_stats**: Per-run orchestrator metrics
+* **syncer_stats**: Per-period syncer metrics (formerly writer_stats)
+* **stats_collector_stats**: Per-period stats collector self-monitoring
+
+#### Benefits
+* Centralizes all stats logic in one component
+* No stats-related I/O in scheduler loop or orchestrators
+* Consistent aggregation and calculations across all components
+* Easy to add new metrics without modifying multiple components
+* Self-monitoring to track stats collector health
+
+### Scheduled Run Index
+The Scheduled Run Index (`internal/scheduler/index`) provides efficient time-based queries for scheduled job runs. See `internal/scheduler/index/spec.md` for full implementation details.
+
+#### Design
+* **Lock-free atomic swapping**: Uses atomic.Pointer for concurrent access without locks
+* **Sorted slice**: Runs sorted by (ScheduledAt, JobID) for binary search
+* **Bulk rebuild strategy**: Periodically rebuild entire index rather than incremental updates
+* **O(log n + k) queries**: Binary search to find start position + linear scan for results
+
+#### Operations
+* **Build**: Create index from sorted runs (sorts unsorted input)
+* **Query**: Find all runs in time window [start, end)
+* **Len**: Get count of scheduled runs
+* **Swap**: Atomically replace index with new sorted runs
+
+#### Performance Characteristics
+* Build 1M runs: < 150ms (including sort)
+* Query: < 1ms even with 1M runs in index
+* Memory: ~40 bytes per run (~40MB for 1M runs)
+* No lock contention on read path
+
+#### Integration with Scheduler
+* Index builder goroutine queries database for job definitions
+* Generates runs for window: (now - GracePeriod, now + LookaheadWindow)
+* Sorts runs by time and job ID
+* Atomically swaps index pointer
+* Main loop queries index for runs to schedule
+
+### Cron Parser
+The Cron Parser (`internal/cron`) parses standard 5-field cron expressions and calculates scheduled run times. See `internal/cron/spec.md` for full implementation details.
+
+#### Format
+* Standard 5-field cron: minute hour day-of-month month day-of-week
+* Supported syntax: * (any), , (list), - (range), / (step)
+* Examples: `0 0 * * *` (daily), `*/15 * * * *` (every 15 minutes)
+
+#### API
+* **Parse(expr string)**: Parse cron expression into CronSchedule
+* **Next(after time.Time, count int)**: Calculate next N occurrences
+* **Between(start, end time.Time)**: Calculate all occurrences in window
+
+#### Performance
+* Parse 10,000 schedules: ~5ms
+* Calculate 1 hour of runs for 10,000 schedules: ~5ms
+* Efficient enough to rebuild entire index every 30-60 seconds
+
+### Database Layer
+The Database Layer (`internal/db`) provides a shared abstraction for all database operations. See `internal/db/spec.md` for full implementation details.
+
+#### Support
+* **Primary**: PostgreSQL (production)
+* **Development/Testing**: SQLite (in-memory and file-based)
+* **Optional**: MySQL (alternative production option)
+
+#### Core Features
+* Connection management with pooling
+* Transaction support (Begin/Commit/Rollback)
+* Type-safe query interface for all tables
+* Database-agnostic SQL dialect handling
+* In-memory SQLite for tests
+
+#### Schema Tables
+See database schema section below for detailed table definitions.
+
+### Constraint Checker
+The Constraint Checker (`internal/constraints`) provides a pluggable system for evaluating constraints on job runs. See `internal/constraints/spec.md` for full implementation details.
+
+#### Design Principles
+* **Opaque to Orchestrator**: Orchestrator receives simple ShouldProceed boolean
+* **Interface-Based**: Constraints and actions implement interfaces
+* **Type-Safe**: Each constraint type is its own struct
+* **Multi-Phase Evaluation**: Pre-execution, during-execution, and post-execution
+* **Per-Constraint Configuration**: Each constraint specifies when to evaluate and what actions to take
+
+#### Constraint Types Implemented
+1. **TimeWindowConstraint**: Check if within time window
+2. **OtherJobRunningConstraint**: Check if another job is running
+3. **OtherJobCompletedRecentlyConstraint**: Check if job completed recently
+4. **OtherJobScheduledSoonConstraint**: Check if job scheduled soon
+5. **HTTPHealthCheckConstraint**: Make HTTP request and check response
+6. **MaxRuntimeConstraint**: Check runtime limit (during execution)
+7. **MinRuntimeConstraint**: Check minimum runtime (post execution)
+8. **AlwaysPassConstraint**: Always succeeds (testing)
+9. **AlwaysFailConstraint**: Always fails (testing)
+
+#### Integration
+* Orchestrator calls CheckPreExecution(), CheckDuringExecution(), CheckPostExecution()
+* Constraint checker evaluates all applicable constraints for that phase
+* For each constraint result (met or violated), executes associated action list
+* Returns ConstraintCheckResult with ShouldProceed boolean
+
+### Action System
+The Action System (`internal/actions`) provides action execution in response to constraint evaluation. See `internal/actions/spec.md` for full implementation details.
+
+#### Design Principles
+* **Interface-Based**: All actions implement Action interface
+* **Isolated Execution**: Each action runs independently
+* **Type-Safe**: Each action type is its own struct
+* **Context-Based Communication**: Actions receive execution context with dependencies
+
+#### Action Types
+1. **DelayAction**: Pause execution for duration
+2. **WebhookAction**: Send HTTP webhook
+3. **LogAction**: Log a message
+4. **FailAction**: Force job run to fail
+5. **NoOpAction**: Do nothing (testing)
+
+#### Integration
+* Actions are triggered by constraints (onViolation or onMet)
+* Constraint checker executes actions internally
+* Actions receive ExecutionContext with job info, inbox, webhook handler, logger
+
+### Supporting Components
+
+#### Inbox
+Generic typed inbox implementation (`internal/inbox`) for inter-component communication with timeout support.
+
+#### Config
+Configuration management (`internal/config`) for application settings.
 
 ## Job Constraints and Actions
 
-### Built-in Constraints
-Constraints are conditions evaluated at different points in the job lifecycle. All constraints are built into the orchestrator.
+The Itinerary scheduler provides a pluggable constraint and action system. Constraints are evaluated at different phases of the job lifecycle (pre-execution, during-execution, post-execution). When constraints are met or violated, associated actions are executed.
+
+### Constraint System Architecture
+* **Interface-based**: All constraints implement the Constraint interface
+* **Multi-phase evaluation**: Each constraint specifies which phases it applies to
+* **Configuration-driven**: Constraints are stored in database and loaded at runtime
+* **Action triggers**: Each constraint can specify onViolation and onMet action lists
+
+### Implemented Constraint Types
+
+See `internal/constraints/spec.md` for full implementation details.
 
 **Pre-execution constraints:**
-* `maxConcurrentRuns` - Maximum number of concurrent runs allowed for this job
-* `requirePreviousSuccess` - Requires that a specified job with specified args has completed successfully before this job can run
-* `preRunHook` - Webhook that must return 200 before the job is allowed to run
-* `catchUp` - Whether the job should run if its scheduled time was missed (evaluated within catchUpWindow)
-* `catchUpWindow` - Time window to look backwards for missed job runs
+* `time_window` - Job must run within specified time window (e.g., business hours only)
+* `other_job_running` - Check if another job is currently running (or not running)
+* `other_job_completed_recently` - Requires another job completed within time window
+* `other_job_scheduled_soon` - Check if another job is scheduled soon
+* `http_health_check` - Make HTTP request to health check endpoint (supports templating)
 
-**Execution-time constraints:**
-* `maxExpectedRunTime` - Duration after which job is marked as "behindSchedule" (can trigger webhook)
-* `maxAllowedRunTime` - Duration after which job is hard-killed and marked as failed
+**During-execution constraints:**
+* `max_runtime` - Maximum allowed runtime before action is taken
 
 **Post-execution constraints:**
-* `postRunHook` - Webhook that must return 200 for the job to be considered successful
+* `min_runtime` - Minimum expected runtime (detect jobs that exit too quickly)
 
-### Built-in Actions
-Actions are behaviors that can be triggered when constraints are violated or jobs fail. Actions are executed by the orchestrator either directly or by sending messages to the main scheduler loop.
+**Testing constraints:**
+* `always_pass` - Always succeeds (for testing action execution)
+* `always_fail` - Always fails (for testing violation actions)
+
+### Action System Architecture
+* **Interface-based**: All actions implement the Action interface
+* **Isolated execution**: Each action runs independently
+* **Trigger-driven**: Actions specify when they trigger (on_met or on_violated)
+* **Context-provided**: Actions receive dependencies via ExecutionContext
+
+### Implemented Action Types
+
+See `internal/actions/spec.md` for full implementation details.
 
 **Available actions:**
-* `retry` - Retry the current job run (orchestrator restarts the job)
-* `kickOffJob` - Start another job (orchestrator spawns new job)
-* `webhook` - Trigger a webhook notification
-* `killAllInstances` - Kill all currently running instances of the job (message to main loop)
-* `killLatestInstance` - Kill the most recent running instance of the job (message to main loop)
-* `skipNextInstance` - Skip the next scheduled run of the job (message to main loop)
+* `delay` - Pause execution for specified duration
+* `webhook` - Send HTTP webhook with configurable payload
+* `log` - Log a message
+* `fail` - Force job run to fail with reason
+* `noop` - Do nothing (for testing)
 
-### Webhook Integrations
-Webhooks can be triggered as actions or as part of constraint evaluation.
+### Future Constraint Types
+Planned but not yet implemented:
+* `maxConcurrentRuns` - Limit concurrent runs of this job
+* `requirePreviousSuccess` - Require specific job completed successfully
+* `catchUp` / `catchUpWindow` - Handle missed scheduled runs
+* `preRunHook` / `postRunHook` - Webhook-based pre/post checks
 
-**Built-in webhook types:**
-* **Slack** - Send messages to Slack channels
-* **New Relic** - Send events to New Relic
-* **PagerDuty** - Create/update PagerDuty incidents
-* **Custom** - User-defined webhook with template variables
-
-**Available template variables for custom webhooks:**
-* `cluster` - Kubernetes cluster name
-* `jobName` - Job name
-* `jobNamespace` - Job namespace
-* `jobCommand` - Job command
-* `jobArgs` - Job arguments
-* `runID` - Current run ID
-* `status` - Current job status
-* `error` - Error message (if failed)
+### Future Action Types
+Planned but not yet implemented:
+* `retry` - Retry the current job run
+* `kickOffJob` - Start another job
+* `killAllInstances` - Kill all running instances
+* `killLatestInstance` - Kill most recent instance
+* `skipNextInstance` - Skip next scheduled run
+* `sendEmail` - Email notification
+* `slack` - Specialized Slack integration
+* `pagerduty` - PagerDuty incident creation
 
 ## Application Startup Sequence
 
@@ -327,219 +595,168 @@ The application follows this startup sequence:
 
 3. **Run Database Migrations**
    - Automatically run on every startup (unless `--skip-migrations` flag is set)
+   - Uses migrator tool (`tools/migrator`)
    - Acquires advisory lock to prevent concurrent migrations
-   - Applies all pending migrations in order
+   - Applies all pending migrations in order (with dependency validation)
    - Logs current schema version
    - Fails fast if migrations fail (application won't start with outdated schema)
 
 4. **Initialize Components**
-   - Start Stats Collector goroutine
-   - Start Webhook Handler goroutine
-   - Start Syncer goroutine
+   - Create Stats Collector and start goroutine
+   - Create Job State Syncer and start 4 background goroutines (flushers and syncers)
+   - Initialize constraint checker
+   - Initialize action executor
 
 5. **Initialize Scheduler**
    - Load job definitions from database
-   - Build initial ScheduledRunIndex
-   - Start main scheduler loop
+   - Build initial ScheduledRunIndex (synchronously on startup)
+   - Create inbox with configured buffer size
+   - Initialize active orchestrators map
+   - Start scheduler main loop
+   - Start index builder background goroutine
 
-6. **Start HTTP API Server**
+6. **Start HTTP API Server** (future)
    - Expose REST API for job management
    - Health check endpoints
    - Metrics endpoints
 
 7. **Graceful Shutdown**
    - Listen for SIGINT/SIGTERM
-   - Signal main scheduler loop to stop
-   - Stop accepting new jobs
-   - Allow running jobs to complete (with timeout)
-   - Stop Webhook Handler (complete in-flight webhooks)
-   - Stop Syncer (flush pending updates)
-   - Stop Stats Collector (flush pending stats)
+   - Send shutdown message to scheduler inbox
+   - Scheduler main loop:
+     - Cancels all active orchestrators
+     - Stops accepting new jobs
+     - Exits main loop
+   - Shutdown Job State Syncer:
+     - Stop flushers
+     - Final flush of buffered data
+     - Close channels
+     - Wait for syncers to drain
+   - Shutdown Stats Collector:
+     - Stop accepting new stats
+     - Flush pending stats
+     - Close database connection
    - Close database connections
    - Exit cleanly
 
-### Command-Line Flags
+### Command-Line Flags (Planned)
 
 ```bash
 itinerary \
   --db-driver=postgres \
   --db-dsn="postgres://user:pass@localhost/itinerary?sslmode=disable" \
   --migrations-dir=./migrations \
-  --skip-migrations=false
+  --skip-migrations=false \
+  --config-file=./config.yaml
 ```
 
-## Database connection
-### Database abstraction
-* itinerary should be able to run with an relational store
-* We will likely need to use a library to abstract over the database connection
-* All connections besides the `Recorder` connection should be read only
-* Migrations are run automatically on startup before the scheduler initializes
-### Schema definition
-* constraint_types (dimension table - read-only reference data)
-    - id pk (manually assigned, never reused)
-    - name (unique constraint type identifier)
-    - Built-in types: maxConcurrentRuns (1), catchUp (2), preRunHook (3), postRunHook (4), catchUpWindow (5), maxExpectedRunTime (6), maxAllowedRunTime (7), requirePreviousSuccess (8)
-    - New types added via migrations using INSERT OR IGNORE / ON CONFLICT DO NOTHING
-  action_types (dimension table - read-only reference data)
-    - id pk (manually assigned, never reused)
-    - name (unique action type identifier)
-    - Built-in types: retry (1), kickOffJob (2), webhook (3), killAllInstances (4), killLatestInstance (5), skipNextInstance (6)
-    - New types added via migrations using INSERT OR IGNORE / ON CONFLICT DO NOTHING
-  job
-    - id pk
-    - name
-    - schedule
-    - podSpec (JSON)
-    - constraints (JSON) - map of constraint_type_id → constraint config
-    - created_at
-    - updated_at
-  job_actions
-    - id pk
-    - job_id (fk job.id)
-    - action_type_id (fk action_types.id)
-    - trigger (on_failure, on_violation, on_success, etc.)
-    - constraint_type_id (fk constraint_types.id, nullable) - when trigger is on_violation, specifies which constraint violation triggers this action
-    - config (JSON) - action-specific configuration (webhook URL, retry count, etc.)
-  job_run
-    - job_id (fk job.id) (pk with scheduled_at)
-    - run_id (unique)
-    - scheduled_at (pk with job_id)
-    - started_at
-    - completed_at
-    - status
-    - success
-    - error
-  constraint_violations
-    - id pk
-    - run_id (fk job_runs.run_id)
-    - constraint_type_id (fk constraint_types.id)
-    - violation_time
-    - details (JSON)
-  action_runs
-    - id pk
-    - run_id (fk job_runs.run_id)
-    - action_type_id (fk action_types.id)
-    - trigger (on_failure, on_violation, on_success, manual)
-    - constraint_violation_id (fk constraint_violations.id, nullable) - references the violation that triggered this action, if applicable
-    - executed_at
-    - success
-    - error
-    - details (JSON) - action-specific details (webhook response, retry count, etc.)
-  scheduler_stats
-    - stats_period_id (pk)
-    - start_time
-    - end_time
-    - iterations
-    - run_jobs
-    - late_jobs
-    - time_passed_run_time
-    - missed_jobs
-    - time_passed_grace_period
-    - jobs_cancelled
-    - min_inbox_length
-    - max_inbox_length
-    - avg_inbox_length
-    - empty_inbox_time
-    - avg_time_in_inbox
-    - min_time_in_inbox
-    - max_time_in_inbox
-  orchestrator_stats
-   - run_id
-   - stats_period_id
-   - runtime
-   - constraints_checked
-   - actions_taken
-  syncer_stats (formerly writer_stats)
-    - stats_period_id (pk)
-    - start_time
-    - end_time
-    - total_writes
-    - writes_succeeded
-    - writes_failed
-    - avg_writes_in_flight
-    - max_writes_in_flight
-    - min_writes_in_flight
-    - avg_queued_writes
-    - max_queued_writes
-    - min_queued_writes
-    - avg_inbox_length
-    - max_inbox_length
-    - min_inbox_length
-    - avg_time_in_write_queue
-    - max_time_in_write_queue
-    - min_time_in_write_queue
-    - avg_time_in_inbox
-    - max_time_in_inbox
-    - min_time_in_inbox
-  stats_collector_stats
-    - stats_period_id (pk)
-    - start_time
-    - end_time
-    - messages_received
-    - messages_processed
-    - scheduler_messages
-    - orchestrator_messages
-    - syncer_messages
-    - webhook_messages
-    - periods_completed
-    - database_flushes
-    - flush_errors
-    - avg_inbox_length
-    - max_inbox_length
-    - min_inbox_length
-    - avg_processing_time (microseconds)
-    - max_processing_time (microseconds)
-    - min_processing_time (microseconds)
-  webhook_deliveries (future)
-    - id pk
-    - run_id (fk job_runs.run_id)
-    - webhook_type (slack, newrelic, pagerduty, custom)
-    - trigger (on_failure, on_violation, on_success, manual)
-    - url
-    - attempt_count
-    - status_code
-    - success
-    - error
-    - request_duration (milliseconds)
-    - created_at
-    - delivered_at
-  webhook_handler_stats (future)
-    - stats_period_id pk
-    - start_time
-    - end_time
-    - webhooks_sent
-    - webhooks_succeeded
-    - webhooks_failed
-    - total_retries
-    - avg_delivery_time (milliseconds)
-    - max_delivery_time (milliseconds)
-    - min_delivery_time (milliseconds)
-    - avg_inbox_length
-    - max_inbox_length
-    - min_inbox_length
+See `internal/config` for configuration management implementation.
 
-### Indexes
-* idx_job_runs_run_id - unique index on job_runs.run_id
-* idx_job_actions_job_id - index on job_actions.job_id (FK)
-* idx_job_actions_action_type_id - index on job_actions.action_type_id (FK)
-* idx_job_actions_constraint_type_id - index on job_actions.constraint_type_id (FK)
-* idx_job_runs_job_id - index on job_runs.job_id (FK)
-* idx_constraint_violations_run_id - index on constraint_violations.run_id (FK)
-* idx_constraint_violations_constraint_type_id - index on constraint_violations.constraint_type_id (FK)
-* idx_action_runs_run_id - index on action_runs.run_id (FK)
-* idx_action_runs_action_type_id - index on action_runs.action_type_id (FK)
-* idx_action_runs_constraint_violation_id - index on action_runs.constraint_violation_id (FK)
-* idx_scheduler_stats_start_time - index on scheduler_stats.start_time
-* idx_scheduler_stats_end_time - index on scheduler_stats.end_time
-* idx_orchestrator_stats_stats_period_id - index on orchestrator_stats.stats_period_id (FK)
-* idx_syncer_stats_start_time - index on syncer_stats.start_time
-* idx_syncer_stats_end_time - index on syncer_stats.end_time
-* idx_stats_collector_stats_start_time - index on stats_collector_stats.start_time
-* idx_stats_collector_stats_end_time - index on stats_collector_stats.end_time
-* idx_webhook_handler_stats_start_time - index on webhook_handler_stats.start_time (future)
-* idx_webhook_handler_stats_end_time - index on webhook_handler_stats.end_time (future)
-* idx_webhook_deliveries_run_id - index on webhook_deliveries.run_id (FK) (future)
-* idx_webhook_deliveries_created_at - index on webhook_deliveries.created_at (future)
+## Database Layer
+### Database Abstraction
+The database layer (`internal/db`) provides abstraction over relational databases using only the Go standard library `database/sql` package. See `internal/db/spec.md` for full implementation details.
+
+### Supported Databases
+* **PostgreSQL**: Primary production database
+* **SQLite**: Development and testing (in-memory and file-based)
+* **MySQL**: Optional production alternative
+
+### Connection Management
+* Connection pooling with configurable limits
+* Transaction support (Begin/Commit/Rollback)
+* Type-safe query interface
+* Database-specific SQL dialect handling
+
+### Migrations
+Migrations are managed by the migrator tool (`tools/migrator`). See `tools/migrator/spec.md` for full implementation details.
+
+* SQL-based migrations in `<version>_<description>.sql` format
+* Automatic execution on application startup (unless `--skip-migrations` flag)
+* Advisory locks prevent concurrent migrations
+* Version tracking in `schema_migrations` table
+* Support for non-transactional migrations
+* Migration dependency declarations for branch management
+### Core Schema Tables
+
+See `internal/db/spec.md` for complete schema definitions and SQL.
+
+#### Dimension Tables (Reference Data)
+* **constraint_types**: Define types of constraints (manually assigned IDs, never deleted)
+* **action_types**: Define types of actions (manually assigned IDs, never deleted)
+
+#### Job Configuration Tables
+* **jobs**: Job definitions with name, schedule (cron), pod_spec (JSON)
+* **constraints**: Constraint instances attached to jobs (references constraint_types)
+* **actions**: Action instances attached to constraints (references action_types)
+
+#### Job Execution Tables
+* **job_runs**: Individual job executions
+  - Primary key: (job_id, scheduled_at)
+  - Unique index: run_id (format: "jobID:unixTimestamp")
+  - Fields: job_id, run_id, scheduled_at, started_at, completed_at, status, success, error, trigger
+  - Trigger values: 'scheduled', 'manual', 'retry', 'action'
+* **constraint_runs**: Records of constraint evaluations
+  - Links to job_runs and constraints
+  - Fields: success, violated, in_error, error, details (JSON)
+* **action_runs**: Records of action executions (future)
+  - Links to job_runs, actions, and optional constraint_runs
+  - Fields: trigger, executed_at, success, error, details (JSON)
+#### Statistics Tables
+
+See `internal/stats/spec.md` and `internal/db/spec.md` for complete definitions.
+
+* **scheduler_stats**: Per-period scheduler metrics
+  - stats_period_id (pk), start_time, end_time
+  - iterations, run_jobs, late_jobs, missed_jobs, jobs_cancelled
+  - Inbox metrics: min/max/avg inbox length, empty inbox time, time in inbox
+
+* **orchestrator_stats**: Per-run orchestrator metrics
+  - run_id (pk), stats_period_id (fk)
+  - runtime, constraints_checked, actions_taken
+
+* **syncer_stats**: Per-period Job State Syncer metrics
+  - stats_period_id (pk), start_time, end_time
+  - Write metrics: total_writes, writes_succeeded, writes_failed
+  - Queue metrics: min/max/avg writes in flight, queued writes
+  - Inbox metrics: min/max/avg inbox length, time in inbox, time in write queue
+
+* **stats_collector_stats**: Per-period Stats Collector self-monitoring
+  - stats_period_id (pk), start_time, end_time
+  - Message metrics: messages_received, messages_processed by source
+  - Flush metrics: periods_completed, database_flushes, flush_errors
+  - Inbox metrics: min/max/avg inbox length
+  - Processing time: min/max/avg processing time (microseconds)
+
+#### Future Tables
+* **webhook_deliveries**: Track individual webhook delivery attempts
+* **webhook_handler_stats**: Per-period webhook handler metrics
+
+### Database Indexes
+
+See `internal/db/spec.md` for complete indexing strategy. The project takes a conservative approach: indexes are only added when proven necessary through query patterns and performance profiling.
+
+#### Current Indexes
+
+**Unique Indexes:**
+* `idx_job_runs_run_id` - Unique index on job_runs.run_id for GetJobRunByRunID lookups
+
+**Foreign Key Indexes:**
+All foreign keys have indexes to optimize JOIN operations and constraint checks:
+* `idx_constraints_job_id` - constraints.job_id → jobs
+* `idx_actions_constraint_id` - actions.constraint_id → constraints
+* `idx_job_runs_job_id` - job_runs.job_id → jobs
+* `idx_constraint_runs_run_id` - constraint_runs.run_id → job_runs
+* `idx_constraint_runs_constraint_id` - constraint_runs.constraint_id → constraints
+* `idx_orchestrator_stats_stats_period_id` - orchestrator_stats.stats_period_id → scheduler_stats
+
+**Note:** Primary keys automatically create indexes. Composite primary keys (e.g., job_runs) index all PK columns together.
+
+#### Future Indexes
+
+Additional indexes will be added based on:
+* UI query patterns (filtering, searching, sorting)
+* Performance profiling results
+* Proven high-selectivity predicates
 
 ### Dimension Table Management
 
@@ -629,7 +846,32 @@ UPDATE constraint_types SET deprecated = TRUE WHERE id = 5;
 
 
 
-## UI web API
+## Implementation Status
+
+### Fully Implemented Components
+* **Cron Parser** (`internal/cron`): Complete with full test suite
+* **Scheduled Run Index** (`internal/scheduler/index`): Lock-free atomic index with benchmarks
+* **Constraint Checker** (`internal/constraints`): All constraint types implemented and tested
+* **Database Layer** (`internal/db`): Connection management, schema definitions, query interface
+* **Stats Collector** (`internal/stats`): Complete with accumulators and database persistence
+* **Inbox** (`internal/inbox`): Generic typed inbox with timeout support
+* **Job State Syncer** (`internal/scheduler/job_state_syncer.go`): Buffering and flushing logic complete
+* **Scheduler Core** (`internal/scheduler`): Main loop, message handling, heartbeat monitoring
+* **Test Utilities** (`internal/testutil`): Mock implementations for testing
+
+### Partially Implemented
+* **Orchestrator** (`internal/orchestrator`): State machine designed, partial implementation
+* **Actions** (`internal/actions`): Basic actions implemented, more types needed
+* **Migrator** (`tools/migrator`): Specification complete, implementation pending
+
+### Planned Components
+* **Main Application** (`cmd/itinerary`): Entry point and startup logic
+* **HTTP API Server**: REST API for job management and monitoring
+* **Web UI**: React-based user interface for job management
+* **Webhook Handler**: Standalone component for webhook delivery
+* **Kubernetes Integration**: Job creation and pod monitoring
+
+## Future: UI Web API
 * The UI talks to a backend web API which defines the following endpoints
   - GET /runs/<run_id> - Get information on a specific run of a job
   - GET /runs/<job_id> - Get information on runs of a given job given an id
