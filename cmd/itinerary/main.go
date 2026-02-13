@@ -10,7 +10,7 @@ import (
 	"github.com/livinlefevreloca/itinerary/internal/config"
 	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/tools/migrator"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 func main() {

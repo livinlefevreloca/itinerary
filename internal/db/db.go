@@ -52,7 +52,7 @@ func Open(driver, dsn string) (*DB, error) {
 	}
 
 	// Enable foreign key constraints for SQLite
-	if driver == "sqlite3" {
+	if driver == "sqlite" {
 		if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 			db.Close()
 			return nil, err

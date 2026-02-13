@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 
 	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
@@ -123,7 +123,7 @@ func (m *MockDB) SetFailCount(count int) {
 func setupTestDB(t *testing.T) *db.DB {
 	t.Helper()
 
-	database, err := db.Open("sqlite3", ":memory:")
+	database, err := db.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("failed to create test database: %v", err)
 	}

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Test Fixtures and Helpers
@@ -15,7 +15,7 @@ import (
 func NewTestDB(t *testing.T) *DB {
 	t.Helper()
 
-	db, err := Open("sqlite3", ":memory:")
+	db, err := Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("failed to create test database: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestOpen(t *testing.T) {
 	}{
 		{
 			name:    "sqlite in-memory",
-			driver:  "sqlite3",
+			driver:  "sqlite",
 			dsn:     ":memory:",
 			wantErr: false,
 		},
@@ -108,7 +108,7 @@ func TestOpen(t *testing.T) {
 		},
 		{
 			name:    "empty dsn",
-			driver:  "sqlite3",
+			driver:  "sqlite",
 			dsn:     "",
 			wantErr: false,
 		},
@@ -139,7 +139,7 @@ func TestOpen(t *testing.T) {
 
 func TestOpenWithConfig(t *testing.T) {
 	config := Config{
-		Driver:          "sqlite3",
+		Driver:          "sqlite",
 		DSN:             ":memory:",
 		MaxOpenConns:    10,
 		MaxIdleConns:    5,
@@ -169,7 +169,7 @@ func TestPing(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	db, err := Open("sqlite3", ":memory:")
+	db, err := Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("failed to open: %v", err)
 	}
