@@ -461,3 +461,289 @@ func CreateTestHTTPServer(statusCode int, delay time.Duration) *httptest.Server 
 		fmt.Fprint(w, `{"status":"ok"}`)
 	}))
 }
+
+// Action-specific mocks
+
+// MockWebhookHandler implements WebhookSender for testing
+type MockWebhookHandler struct {
+	mu             sync.Mutex
+	calls          []WebhookCall
+	returnError    error
+	shouldFail     bool
+	failureMessage string
+}
+
+type WebhookCall struct {
+	URL     string
+	Payload interface{}
+}
+
+func NewMockWebhookHandler() *MockWebhookHandler {
+	return &MockWebhookHandler{
+		calls: make([]WebhookCall, 0),
+	}
+}
+
+func (m *MockWebhookHandler) SendWebhook(url string, payload interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.calls = append(m.calls, WebhookCall{
+		URL:     url,
+		Payload: payload,
+	})
+
+	if m.shouldFail {
+		return m.returnError
+	}
+
+	return nil
+}
+
+func (m *MockWebhookHandler) GetCalls() []WebhookCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]WebhookCall{}, m.calls...)
+}
+
+func (m *MockWebhookHandler) SetError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.returnError = err
+	m.shouldFail = true
+}
+
+func (m *MockWebhookHandler) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = make([]WebhookCall, 0)
+	m.shouldFail = false
+	m.returnError = nil
+}
+
+// MockJobController implements JobController for testing
+type MockJobController struct {
+	mu              sync.Mutex
+	retryCalls      []string
+	triggerCalls    []TriggerCall
+	killAllCalls    []string
+	killLatestCalls []string
+	skipNextCalls   []string
+	returnError     error
+	shouldFail      bool
+}
+
+type TriggerCall struct {
+	JobID string
+	Args  map[string]interface{}
+}
+
+func NewMockJobController() *MockJobController {
+	return &MockJobController{
+		retryCalls:      make([]string, 0),
+		triggerCalls:    make([]TriggerCall, 0),
+		killAllCalls:    make([]string, 0),
+		killLatestCalls: make([]string, 0),
+		skipNextCalls:   make([]string, 0),
+	}
+}
+
+func (m *MockJobController) RetryJob(jobID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.retryCalls = append(m.retryCalls, jobID)
+	if m.shouldFail {
+		return m.returnError
+	}
+	return nil
+}
+
+func (m *MockJobController) TriggerJob(jobID string, args map[string]interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.triggerCalls = append(m.triggerCalls, TriggerCall{JobID: jobID, Args: args})
+	if m.shouldFail {
+		return m.returnError
+	}
+	return nil
+}
+
+func (m *MockJobController) KillAllInstances(jobID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.killAllCalls = append(m.killAllCalls, jobID)
+	if m.shouldFail {
+		return m.returnError
+	}
+	return nil
+}
+
+func (m *MockJobController) KillLatestInstance(jobID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.killLatestCalls = append(m.killLatestCalls, jobID)
+	if m.shouldFail {
+		return m.returnError
+	}
+	return nil
+}
+
+func (m *MockJobController) SkipNextInstance(jobID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.skipNextCalls = append(m.skipNextCalls, jobID)
+	if m.shouldFail {
+		return m.returnError
+	}
+	return nil
+}
+
+func (m *MockJobController) SetError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.returnError = err
+	m.shouldFail = true
+}
+
+func (m *MockJobController) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.retryCalls = make([]string, 0)
+	m.triggerCalls = make([]TriggerCall, 0)
+	m.killAllCalls = make([]string, 0)
+	m.killLatestCalls = make([]string, 0)
+	m.skipNextCalls = make([]string, 0)
+	m.shouldFail = false
+	m.returnError = nil
+}
+
+func (m *MockJobController) GetRetryCalls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string{}, m.retryCalls...)
+}
+
+func (m *MockJobController) GetTriggerCalls() []TriggerCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]TriggerCall{}, m.triggerCalls...)
+}
+
+func (m *MockJobController) GetKillAllCalls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string{}, m.killAllCalls...)
+}
+
+func (m *MockJobController) GetKillLatestCalls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string{}, m.killLatestCalls...)
+}
+
+func (m *MockJobController) GetSkipNextCalls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string{}, m.skipNextCalls...)
+}
+
+// MockMetadataUpdater implements MetadataUpdater for testing
+type MockMetadataUpdater struct {
+	mu          sync.Mutex
+	calls       []MetadataUpdateCall
+	returnError error
+	shouldFail  bool
+}
+
+type MetadataUpdateCall struct {
+	JobID    string
+	Metadata map[string]interface{}
+}
+
+func NewMockMetadataUpdater() *MockMetadataUpdater {
+	return &MockMetadataUpdater{
+		calls: make([]MetadataUpdateCall, 0),
+	}
+}
+
+func (m *MockMetadataUpdater) UpdateMetadata(jobID string, metadata map[string]interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, MetadataUpdateCall{JobID: jobID, Metadata: metadata})
+	if m.shouldFail {
+		return m.returnError
+	}
+	return nil
+}
+
+func (m *MockMetadataUpdater) SetError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.returnError = err
+	m.shouldFail = true
+}
+
+func (m *MockMetadataUpdater) GetCalls() []MetadataUpdateCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]MetadataUpdateCall{}, m.calls...)
+}
+
+func (m *MockMetadataUpdater) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = make([]MetadataUpdateCall, 0)
+	m.shouldFail = false
+	m.returnError = nil
+}
+
+// MockMetricRecorder implements MetricRecorder for testing
+type MockMetricRecorder struct {
+	mu          sync.Mutex
+	calls       []MetricRecordCall
+	returnError error
+	shouldFail  bool
+}
+
+type MetricRecordCall struct {
+	Name  string
+	Value float64
+	Tags  map[string]string
+}
+
+func NewMockMetricRecorder() *MockMetricRecorder {
+	return &MockMetricRecorder{
+		calls: make([]MetricRecordCall, 0),
+	}
+}
+
+func (m *MockMetricRecorder) RecordMetric(name string, value float64, tags map[string]string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, MetricRecordCall{Name: name, Value: value, Tags: tags})
+	if m.shouldFail {
+		return m.returnError
+	}
+	return nil
+}
+
+func (m *MockMetricRecorder) SetError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.returnError = err
+	m.shouldFail = true
+}
+
+func (m *MockMetricRecorder) GetCalls() []MetricRecordCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]MetricRecordCall{}, m.calls...)
+}
+
+func (m *MockMetricRecorder) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = make([]MetricRecordCall, 0)
+	m.shouldFail = false
+	m.returnError = nil
+}
