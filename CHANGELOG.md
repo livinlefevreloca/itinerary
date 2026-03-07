@@ -21,4 +21,13 @@
 ### Refactored
 - Split `db/jobs.go` into `db/jobs.go`, `db/constraints.go`, and `db/actions.go`
 - Moved constraint test mocks to `constraints/testhelpers_test.go`
+- Moved stats MockDB to `stats/testhelpers_test.go` as `MockStatsDatabaseWriter`
+- Removed duplicate `MockInbox` and `MockWebhookHandler` from orchestrator tests (unused stubs)
+- Consolidated orchestrator test helpers; `createTestLogger` now uses `testutil.TestLogger`
 - Updated scheduler `OrchestratorStatus` enum to match simplified state machine
+
+### Test Organization
+Each package with test mocks now follows a consistent pattern:
+- `testutil/mocks.go` — shared mocks with no internal package dependencies
+- `<package>/testhelpers_test.go` — package-specific mocks that use package-internal types
+- `actions/testhelpers.go` — exported test builder (used by action tests)

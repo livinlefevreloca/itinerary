@@ -3,7 +3,6 @@ package stats
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,112 +11,6 @@ import (
 	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
-
-// =============================================================================
-// Test Helpers
-// =============================================================================
-
-// MockDB simulates database operations for testing
-type MockDB struct {
-	schedulerStats []*SchedulerStatsData
-	orchestrator   []*OrchestratorStatsData
-	syncerStats    []*SyncerStatsData
-	failCount      int32 // Fail this many times before succeeding
-	writeLatency   time.Duration
-	writeCalls     int32
-}
-
-func NewMockDB() *MockDB {
-	return &MockDB{
-		schedulerStats: make([]*SchedulerStatsData, 0),
-		orchestrator:   make([]*OrchestratorStatsData, 0),
-		syncerStats:    make([]*SyncerStatsData, 0),
-	}
-}
-
-func (m *MockDB) WriteSchedulerStats(periodID string, startTime, endTime time.Time, data *SchedulerStatsAccumulator) error {
-	atomic.AddInt32(&m.writeCalls, 1)
-
-	if m.writeLatency > 0 {
-		time.Sleep(m.writeLatency)
-	}
-
-	failCount := atomic.LoadInt32(&m.failCount)
-	if failCount > 0 {
-		atomic.AddInt32(&m.failCount, -1)
-		return fmt.Errorf("simulated database failure")
-	}
-
-	// Store for verification
-	m.schedulerStats = append(m.schedulerStats, &SchedulerStatsData{
-		Iterations:     data.Iterations,
-		JobsRun:        data.JobsRun,
-		LateJobs:       data.LateJobs,
-		MissedJobs:     data.MissedJobs,
-		JobsCancelled:  data.JobsCancelled,
-	})
-	return nil
-}
-
-func (m *MockDB) WriteOrchestratorStats(periodID string, startTime, endTime time.Time, stats map[string]*OrchestratorStatsData) error {
-	atomic.AddInt32(&m.writeCalls, 1)
-
-	if m.writeLatency > 0 {
-		time.Sleep(m.writeLatency)
-	}
-
-	failCount := atomic.LoadInt32(&m.failCount)
-	if failCount > 0 {
-		atomic.AddInt32(&m.failCount, -1)
-		return fmt.Errorf("simulated database failure")
-	}
-
-	for _, stat := range stats {
-		m.orchestrator = append(m.orchestrator, stat)
-	}
-	return nil
-}
-
-func (m *MockDB) WriteSyncerStats(periodID string, startTime, endTime time.Time, data *SyncerStatsAccumulator) error {
-	atomic.AddInt32(&m.writeCalls, 1)
-
-	if m.writeLatency > 0 {
-		time.Sleep(m.writeLatency)
-	}
-
-	failCount := atomic.LoadInt32(&m.failCount)
-	if failCount > 0 {
-		atomic.AddInt32(&m.failCount, -1)
-		return fmt.Errorf("simulated database failure")
-	}
-
-	m.syncerStats = append(m.syncerStats, &SyncerStatsData{
-		TotalWrites:     data.TotalWrites,
-		WritesSucceeded: data.WritesSucceeded,
-		WritesFailed:    data.WritesFailed,
-	})
-	return nil
-}
-
-func (m *MockDB) GetSchedulerStatsCount() int {
-	return len(m.schedulerStats)
-}
-
-func (m *MockDB) GetOrchestratorStatsCount() int {
-	return len(m.orchestrator)
-}
-
-func (m *MockDB) GetSyncerStatsCount() int {
-	return len(m.syncerStats)
-}
-
-func (m *MockDB) GetWriteCalls() int {
-	return int(atomic.LoadInt32(&m.writeCalls))
-}
-
-func (m *MockDB) SetFailCount(count int) {
-	atomic.StoreInt32(&m.failCount, int32(count))
-}
 
 // setupTestDB creates an in-memory SQLite database with schema
 func setupTestDB(t *testing.T) *db.DB {
@@ -230,7 +123,7 @@ func setupTestDB(t *testing.T) *db.DB {
 func TestNewStatsCollector(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultConfig()
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -297,7 +190,7 @@ func TestSend_Success(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultConfig()
 	config.InboxBufferSize = 10
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -327,7 +220,7 @@ func TestSend_Timeout(t *testing.T) {
 	config := DefaultConfig()
 	config.InboxBufferSize = 1
 	config.InboxSendTimeout = 10 * time.Millisecond
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -350,7 +243,7 @@ func TestSend_Timeout(t *testing.T) {
 func TestMessageRouting_Scheduler(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultConfig()
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -384,7 +277,7 @@ func TestMessageRouting_Scheduler(t *testing.T) {
 func TestMessageRouting_Orchestrator(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultConfig()
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -427,7 +320,7 @@ func TestMessageRouting_Orchestrator(t *testing.T) {
 func TestMessageRouting_Syncer(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultConfig()
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -602,7 +495,7 @@ func TestCalculateMinMaxAvg_Durations(t *testing.T) {
 func TestOrchestratorStats_MultipleRuns(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultConfig()
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -786,7 +679,7 @@ func TestConcurrentSends(t *testing.T) {
 	config := DefaultConfig()
 	config.InboxBufferSize = 10000
 	config.FlushThreshold = 10000 // Prevent flushing during test
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -836,7 +729,7 @@ func TestConcurrentSends(t *testing.T) {
 func TestEmptyAccumulatorFlush(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultConfig()
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -866,7 +759,7 @@ func TestSingleSampleCalculations(t *testing.T) {
 func TestZeroValues(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultConfig()
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -895,7 +788,7 @@ func TestZeroValues(t *testing.T) {
 func TestGracefulShutdown_EmptyInbox(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultConfig()
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -916,7 +809,7 @@ func TestGracefulShutdown_PendingMessages(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultConfig()
 	config.FlushThreshold = 100 // High threshold so we don't auto-flush
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 
@@ -950,7 +843,7 @@ func TestGracefulShutdown_PendingMessages(t *testing.T) {
 func TestStopIdempotency(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	config := DefaultConfig()
-	mockDB := NewMockDB()
+	mockDB := NewMockStatsDatabaseWriter()
 
 	collector := NewStatsCollector(config, mockDB, logger.Logger())
 

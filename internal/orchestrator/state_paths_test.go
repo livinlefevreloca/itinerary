@@ -22,7 +22,7 @@ func TestStatePaths_HappyPath(t *testing.T) {
 		now().Add(-1*time.Second),
 		createNoOpConstraintChecker(), // no constraints
 		createFakeK8sClient(),
-		createTestLogger(),
+		createTestLogger().Logger(),
 	)
 	orch.recorder = recorder
 
@@ -66,7 +66,7 @@ func TestStatePaths_WithConstraints(t *testing.T) {
 		now().Add(-1*time.Second),
 		createMockConstraintChecker(true, nil),
 		createFakeK8sClient(),
-		createTestLogger(),
+		createTestLogger().Logger(),
 	)
 	orch.recorder = recorder
 
@@ -114,7 +114,7 @@ func TestStatePaths_WithActions(t *testing.T) {
 		now().Add(-1*time.Second),
 		createNoOpConstraintChecker(),
 		createFakeK8sClient(),
-		createTestLogger(),
+		createTestLogger().Logger(),
 	)
 	orch.recorder = recorder
 
@@ -172,7 +172,7 @@ func TestStatePaths_WithRetry(t *testing.T) {
 		now().Add(-1*time.Second),
 		createNoOpConstraintChecker(),
 		createFakeK8sClient(),
-		createTestLogger(),
+		createTestLogger().Logger(),
 	)
 	orch.recorder = recorder
 
@@ -295,7 +295,7 @@ func TestStatePaths_Cancellation(t *testing.T) {
 				now().Add(-1*time.Second),
 				createNoOpConstraintChecker(),
 				createFakeK8sClient(),
-				createTestLogger(),
+				createTestLogger().Logger(),
 			)
 			orch.recorder = recorder
 
@@ -318,7 +318,7 @@ func TestStatePaths_Failure(t *testing.T) {
 		now().Add(-1*time.Second),
 		createNoOpConstraintChecker(),
 		createFakeK8sClient(),
-		createTestLogger(),
+		createTestLogger().Logger(),
 	)
 	orch.recorder = recorder
 

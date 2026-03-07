@@ -2,11 +2,10 @@ package orchestrator
 
 import (
 	"context"
-	"log/slog"
-	"os"
 	"testing"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -19,10 +18,8 @@ import (
 // ==============================================================================
 
 // createTestLogger creates a logger for testing
-func createTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelError, // Reduce noise in tests
-	}))
+func createTestLogger() *testutil.TestLogger {
+	return testutil.NewTestLogger()
 }
 
 // createFakeK8sClient creates a fake Kubernetes client for testing
@@ -30,40 +27,12 @@ func createFakeK8sClient() *fake.Clientset {
 	return fake.NewSimpleClientset()
 }
 
-// createMockSchedulerInbox creates a mock inbox for testing
-func createMockSchedulerInbox() *MockInbox {
-	return &MockInbox{
-		messages: make([]interface{}, 0),
-	}
-}
-
-// MockInbox is a simple mock implementation of the inbox
-type MockInbox struct {
-	messages []interface{}
-}
-
-func (m *MockInbox) Send(msg interface{}) {
-	m.messages = append(m.messages, msg)
-}
-
-func (m *MockInbox) GetMessages() []interface{} {
-	return m.messages
-}
-
-// createMockWebhookHandler creates a mock webhook handler for testing
-func createMockWebhookHandler() *MockWebhookHandler {
-	return &MockWebhookHandler{}
-}
-
-type MockWebhookHandler struct {
-	// Add fields as needed
-}
-
 // createNoOpConstraintChecker creates a no-op constraint checker (for jobs with no constraints)
 func createNoOpConstraintChecker() *NoOpConstraintChecker {
 	return &NoOpConstraintChecker{}
 }
 
+// NoOpConstraintChecker implements ConstraintChecker with no-op behavior
 type NoOpConstraintChecker struct{}
 
 func (n *NoOpConstraintChecker) CheckPreExecution(ctx context.Context, job *Job, runID string) (ConstraintCheckResult, error) {
@@ -81,9 +50,9 @@ func (n *NoOpConstraintChecker) ShouldRecheckOnRetry(job *Job) bool {
 // createMockConstraintChecker creates a mock constraint checker for testing
 func createMockConstraintChecker(shouldProceed bool, err error) *MockConstraintChecker {
 	return &MockConstraintChecker{
-		shouldProceed:     shouldProceed,
-		err:               err,
-		recheckOnRetry:    false, // Default: don't recheck
+		shouldProceed:  shouldProceed,
+		err:            err,
+		recheckOnRetry: false,
 	}
 }
 
@@ -96,6 +65,7 @@ func createMockConstraintCheckerWithRecheck(shouldProceed bool, recheckOnRetry b
 	}
 }
 
+// MockConstraintChecker implements ConstraintChecker with configurable behavior
 type MockConstraintChecker struct {
 	shouldProceed  bool
 	recheckOnRetry bool
@@ -136,9 +106,27 @@ func waitForState(t *testing.T, orch *Orchestrator, stateName string, timeout ti
 	t.Fatalf("timeout waiting for state %s, current state: %s", stateName, orch.GetStateName())
 }
 
-// triggerCancellation triggers cancellation on an orchestrator
-func triggerCancellation(orch *Orchestrator) {
-	orch.Cancel()
+// waitForCompletion waits for orchestrator to reach a terminal state
+func waitForCompletion(t *testing.T, orch *Orchestrator, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		stateName := orch.GetStateName()
+		if isTerminalState(stateName) {
+			return stateName
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for terminal state, current state: %s", orch.GetStateName())
+	return orch.GetStateName()
+}
+
+// isTerminalState checks if a state is terminal
+func isTerminalState(stateName string) bool {
+	return stateName == "completed" ||
+		stateName == "failed" ||
+		stateName == "cancelled" ||
+		stateName == "orphaned"
 }
 
 // verifyJobCreated verifies that a job was created in the fake client
@@ -179,41 +167,6 @@ func simulatePodStateChange(fakeClient *fake.Clientset, namespace, podName strin
 	_, err = fakeClient.CoreV1().Pods(namespace).UpdateStatus(context.Background(), pod, metav1.UpdateOptions{})
 	return err
 }
-
-// countHeartbeats counts heartbeat messages in inbox
-func countHeartbeats(inbox *MockInbox) int {
-	count := 0
-	for _, msg := range inbox.GetMessages() {
-		if _, ok := msg.(OrchestratorHeartbeatMsg); ok {
-			count++
-		}
-	}
-	return count
-}
-
-// waitForCompletion waits for orchestrator to reach a terminal state
-func waitForCompletion(t *testing.T, orch *Orchestrator, timeout time.Duration) string {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		stateName := orch.GetStateName()
-		if isTerminalState(stateName) {
-			return stateName
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timeout waiting for terminal state, current state: %s", orch.GetStateName())
-	return orch.GetStateName()
-}
-
-// isTerminalState checks if a state is terminal
-func isTerminalState(stateName string) bool {
-	return stateName == "completed" ||
-		stateName == "failed" ||
-		stateName == "cancelled" ||
-		stateName == "orphaned"
-}
-
 
 // ==============================================================================
 // 2. Phase Timing Tests

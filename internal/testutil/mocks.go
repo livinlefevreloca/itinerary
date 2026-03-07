@@ -747,3 +747,4 @@ func (m *MockMetricRecorder) Reset() {
 	m.shouldFail = false
 	m.returnError = nil
 }
+
