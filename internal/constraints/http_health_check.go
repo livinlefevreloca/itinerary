@@ -67,8 +67,6 @@ func (h *HTTPHealthCheckConstraint) Check(ctx *ExecutionContext) (ConstraintResu
 	// Template data
 	data := map[string]interface{}{
 		"JobName": ctx.Job.Name,
-		"Args":    ctx.Job.Args,
-		"Kwargs":  ctx.Job.Kwargs,
 	}
 
 	// Add timing information if available
