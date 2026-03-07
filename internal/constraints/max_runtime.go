@@ -39,7 +39,7 @@ func (m *MaxRuntimeConstraint) Name() string {
 }
 
 func (m *MaxRuntimeConstraint) EvaluationTiming() []EvaluationPhase {
-	return []EvaluationPhase{EvaluationPhaseDuringExecution}
+	return []EvaluationPhase{EvaluationPhaseDuringExecution, EvaluationPhasePostExecution}
 }
 
 func (m *MaxRuntimeConstraint) ShouldRecheckOnRetry() bool {

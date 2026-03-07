@@ -72,6 +72,9 @@ func (s *JobStateSyncer) FlushJobRunUpdates() error {
 		case s.jobRunChannel <- update:
 			// Successfully sent
 		default:
+			s.logger.Warn("job run channel full, dropping update",
+				"buffered_updates", len(s.jobRunUpdateBuffer),
+				"update_id", update.UpdateID)
 			return fmt.Errorf("job run channel full, %d updates buffered", len(s.jobRunUpdateBuffer))
 		}
 	}

@@ -37,7 +37,8 @@ type Constraint interface {
 	ShouldRecheckOnRetry() bool
 }
 
-// Action is implemented by all action types
+// Action is implemented by all action types within the constraints module.
+// This mirrors the actions.Action interface but operates on the constraints ExecutionContext.
 type Action interface {
 	// Execute performs the action
 	Execute(ctx *ExecutionContext) error
@@ -75,7 +76,7 @@ type MessageSender interface {
 	Send(msg interface{}) error
 }
 
-// Job represents a job definition (simplified for constraints module)
+// Job represents a job definition as seen by the constraints module
 type Job struct {
 	ID     string
 	Name   string

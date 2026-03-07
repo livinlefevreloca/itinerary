@@ -46,7 +46,6 @@ func DefaultConfig() *Config {
 		Database: db.Config{
 			Driver:          "sqlite3",
 			DSN:             "itinerary.db",
-			MaxOpenConns:    25,
 			MaxIdleConns:    5,
 			ConnMaxLifetime: 5 * time.Minute,
 			ConnMaxIdleTime: 5 * time.Minute,

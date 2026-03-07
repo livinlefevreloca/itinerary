@@ -23,7 +23,6 @@ type Tx struct {
 type Config struct {
 	Driver          string        `toml:"driver"`
 	DSN             string        `toml:"dsn"`
-	MaxOpenConns    int           `toml:"max_open_conns"`
 	MaxIdleConns    int           `toml:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `toml:"conn_max_lifetime"`
 	ConnMaxIdleTime time.Duration `toml:"conn_max_idle_time"`
@@ -73,9 +72,6 @@ func OpenWithConfig(config Config) (*DB, error) {
 	}
 
 	// Apply connection pool settings
-	if config.MaxOpenConns > 0 {
-		db.SetMaxOpenConns(config.MaxOpenConns)
-	}
 	if config.MaxIdleConns > 0 {
 		db.SetMaxIdleConns(config.MaxIdleConns)
 	}

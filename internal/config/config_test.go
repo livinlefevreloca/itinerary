@@ -17,9 +17,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Database.DSN != "itinerary.db" {
 		t.Errorf("expected DSN itinerary.db, got %s", cfg.Database.DSN)
 	}
-	if cfg.Database.MaxOpenConns != 25 {
-		t.Errorf("expected max_open_conns 25, got %d", cfg.Database.MaxOpenConns)
-	}
 	if cfg.Database.MigrationsDir != "migrations" {
 		t.Errorf("expected migrations_dir migrations, got %s", cfg.Database.MigrationsDir)
 	}
@@ -50,7 +47,6 @@ func TestLoadFromFile(t *testing.T) {
 [database]
 driver = "postgres"
 dsn = "postgres://localhost/test"
-max_open_conns = 50
 
 [scheduler]
 loop_interval = "2s"
@@ -73,9 +69,6 @@ port = 9000
 	// Check overridden values
 	if cfg.Database.Driver != "postgres" {
 		t.Errorf("expected driver postgres, got %s", cfg.Database.Driver)
-	}
-	if cfg.Database.MaxOpenConns != 50 {
-		t.Errorf("expected max_open_conns 50, got %d", cfg.Database.MaxOpenConns)
 	}
 	if cfg.Scheduler.LoopInterval != 2*time.Second {
 		t.Errorf("expected loop_interval 2s, got %v", cfg.Scheduler.LoopInterval)

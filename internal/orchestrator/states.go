@@ -7,19 +7,22 @@ type State interface {
 	Name() string
 }
 
-// Helper to track state transitions for testing
+// StateRecorder tracks state transitions for testing
 type StateRecorder struct {
 	path []string
 }
 
+// NewStateRecorder creates a new StateRecorder
 func NewStateRecorder() *StateRecorder {
 	return &StateRecorder{path: make([]string, 0)}
 }
 
+// Record records a state transition
 func (r *StateRecorder) Record(state State) {
 	r.path = append(r.path, state.Name())
 }
 
+// Path returns the recorded state transition path
 func (r *StateRecorder) Path() []string {
 	return r.path
 }

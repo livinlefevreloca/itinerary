@@ -96,7 +96,9 @@ func (o *Orchestrator) UpdateConfig(newConfig *Job) {
 	select {
 	case o.configUpdate <- newConfig:
 	default:
-		// Config update channel full, drop update
+		o.logger.Warn("config update channel full, dropping update",
+			"runID", o.runID,
+			"jobID", o.jobID)
 	}
 }
 
@@ -146,12 +148,8 @@ func (o *Orchestrator) run() {
 			o.runPreRun()
 		case *PendingState:
 			o.runPending()
-		case *ConditionPendingState:
-			o.runConditionPending()
 		case *ConditionRunningState:
 			o.runConditionRunning()
-		case *ActionPendingState:
-			o.runActionPending()
 		case *ActionRunningState:
 			o.runActionRunning()
 		case *ContainerCreatingState:
@@ -160,8 +158,6 @@ func (o *Orchestrator) run() {
 			o.runRunning()
 		case *TerminatingState:
 			o.runTerminating()
-		case *RetryingState:
-			o.runRetrying()
 		case *CompletedState:
 			o.runCompleted()
 			return
@@ -220,9 +216,9 @@ func (o *Orchestrator) runPending() {
 
 	// Check if we need to run constraint checks
 	if len(o.jobConfig.ConstraintConfig) > 0 {
-		// Transition to constraint checking phase
+		// Transition directly to constraint running
 		o.timing.ConstraintCheckStarted = time.Now()
-		o.transitionTo(state.ToConditionPending())
+		o.transitionTo(state.ToConditionRunning())
 	} else {
 		// No constraints, go directly to container creation
 		o.timing.ExecutionStartedAt = time.Now()
@@ -230,9 +226,9 @@ func (o *Orchestrator) runPending() {
 	}
 }
 
-// runConditionPending prepares to check constraints
-func (o *Orchestrator) runConditionPending() {
-	state := o.state.(*ConditionPendingState)
+// runConditionRunning executes constraint checks
+func (o *Orchestrator) runConditionRunning() {
+	state := o.state.(*ConditionRunningState)
 
 	// Check for cancellation
 	select {
@@ -241,14 +237,6 @@ func (o *Orchestrator) runConditionPending() {
 		return
 	default:
 	}
-
-	// Transition to actually running the constraint check
-	o.transitionTo(state.ToConditionRunning())
-}
-
-// runConditionRunning executes constraint checks
-func (o *Orchestrator) runConditionRunning() {
-	state := o.state.(*ConditionRunningState)
 
 	// TODO: Implement constraint checking
 	// For now, just transition to container creating
@@ -256,9 +244,9 @@ func (o *Orchestrator) runConditionRunning() {
 	o.transitionTo(state.ToContainerCreating())
 }
 
-// runActionPending prepares to execute actions
-func (o *Orchestrator) runActionPending() {
-	state := o.state.(*ActionPendingState)
+// runActionRunning executes actions
+func (o *Orchestrator) runActionRunning() {
+	state := o.state.(*ActionRunningState)
 
 	// Check for cancellation
 	select {
@@ -267,14 +255,6 @@ func (o *Orchestrator) runActionPending() {
 		return
 	default:
 	}
-
-	// Transition to actually running the action
-	o.transitionTo(state.ToActionRunning())
-}
-
-// runActionRunning executes actions
-func (o *Orchestrator) runActionRunning() {
-	state := o.state.(*ActionRunningState)
 
 	// TODO: Implement action execution
 	// For now, just transition to container creating
@@ -308,15 +288,6 @@ func (o *Orchestrator) runTerminating() {
 	// For now, just transition to completed
 	o.timing.CompletedAt = time.Now()
 	o.transitionTo(state.ToCompleted())
-}
-
-// runRetrying handles retry logic
-func (o *Orchestrator) runRetrying() {
-	state := o.state.(*RetryingState)
-
-	// TODO: Implement retry logic
-	// For now, just transition to pending
-	o.transitionTo(state.ToPending())
 }
 
 // runCompleted handles successful completion

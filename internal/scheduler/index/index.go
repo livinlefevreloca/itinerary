@@ -18,7 +18,7 @@ type ScheduledRunIndex struct {
 func NewScheduledRunIndex(runs []ScheduledRun) *ScheduledRunIndex {
 	idx := &ScheduledRunIndex{}
 
-	// Make a copy and sort
+	// Copy to avoid mutating the caller's slice during sort
 	sorted := make([]ScheduledRun, len(runs))
 	copy(sorted, runs)
 	sortRuns(sorted)

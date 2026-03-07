@@ -12,53 +12,6 @@ import (
 )
 
 // ========================
-// Test Helpers and Mocks
-// ========================
-
-// NoOpAction is a test action that does nothing
-type NoOpAction struct {
-	name string
-}
-
-func NewNoOpAction(name string) *NoOpAction {
-	return &NoOpAction{name: name}
-}
-
-func (n *NoOpAction) Execute(ctx *ExecutionContext) error {
-	return nil
-}
-
-func (n *NoOpAction) Name() string {
-	return n.name
-}
-
-// Helper to create ExecutionContext for tests
-func createTestExecutionContext() *ExecutionContext {
-	return &ExecutionContext{
-		Job:            &Job{ID: "test-job", Name: "test"},
-		RunID:          "test-run-id",
-		SchedulerInbox: testutil.NewMockSchedulerInbox(),
-		HTTPClient:     testutil.CreateTestHTTPClient(),
-		Logger:         testutil.CreateTestSlogLogger(),
-		Context:        context.Background(),
-	}
-}
-
-func createTestExecutionContextWithStartTime(startTime time.Time) *ExecutionContext {
-	ctx := createTestExecutionContext()
-	ctx.StartTime = &startTime
-	return ctx
-}
-
-func createTestExecutionContextWithTiming(startTime, endTime time.Time, exitCode int) *ExecutionContext {
-	ctx := createTestExecutionContext()
-	ctx.StartTime = &startTime
-	ctx.EndTime = &endTime
-	ctx.ExitCode = &exitCode
-	return ctx
-}
-
-// ========================
 // 1. TimeWindowConstraint Tests
 // ========================
 
@@ -1173,104 +1126,21 @@ func TestMaxRuntime_EvaluationPhase(t *testing.T) {
 	constraint := NewMaxRuntimeConstraint("max-1h", 1*time.Hour)
 	timing := constraint.EvaluationTiming()
 
-	if len(timing) != 1 {
-		t.Fatalf("Expected 1 phase, got %d", len(timing))
+	if len(timing) != 2 {
+		t.Fatalf("Expected 2 phases, got %d", len(timing))
 	}
 
 	if timing[0] != EvaluationPhaseDuringExecution {
-		t.Errorf("Expected EvaluationPhaseDuringExecution, got %s", timing[0])
+		t.Errorf("Expected EvaluationPhaseDuringExecution first, got %s", timing[0])
+	}
+
+	if timing[1] != EvaluationPhasePostExecution {
+		t.Errorf("Expected EvaluationPhasePostExecution second, got %s", timing[1])
 	}
 }
 
 // ========================
-// 7. MinRuntimeConstraint Tests
-// ========================
-
-func TestMinRuntime_MeetsMinimum(t *testing.T) {
-	constraint := NewMinRuntimeConstraint("min-30s", 30*time.Second)
-
-	// Job ran for 45 seconds
-	startTime := time.Now().Add(-45 * time.Second)
-	endTime := time.Now()
-	ctx := createTestExecutionContextWithTiming(startTime, endTime, 0)
-
-	result, err := constraint.Check(ctx)
-	if err != nil {
-		t.Fatalf("Expected no error, got: %v", err)
-	}
-
-	if !result.Met {
-		t.Errorf("Expected Met=true (45s >= 30s minimum), got Met=false")
-	}
-}
-
-func TestMinRuntime_BelowMinimum(t *testing.T) {
-	constraint := NewMinRuntimeConstraint("min-30s", 30*time.Second)
-
-	// Job ran for 10 seconds
-	startTime := time.Now().Add(-10 * time.Second)
-	endTime := time.Now()
-	ctx := createTestExecutionContextWithTiming(startTime, endTime, 0)
-
-	result, err := constraint.Check(ctx)
-	if err != nil {
-		t.Fatalf("Expected no error, got: %v", err)
-	}
-
-	if result.Met {
-		t.Errorf("Expected Met=false (10s < 30s minimum), got Met=true")
-	}
-}
-
-func TestMinRuntime_AtMinimum(t *testing.T) {
-	constraint := NewMinRuntimeConstraint("min-30s", 30*time.Second)
-
-	// Job ran for exactly 30 seconds
-	startTime := time.Now().Add(-30 * time.Second)
-	endTime := time.Now()
-	ctx := createTestExecutionContextWithTiming(startTime, endTime, 0)
-
-	result, err := constraint.Check(ctx)
-	if err != nil {
-		t.Fatalf("Expected no error, got: %v", err)
-	}
-
-	if !result.Met {
-		t.Errorf("Expected Met=true (at minimum should pass), got Met=false")
-	}
-}
-
-func TestMinRuntime_NoTiming(t *testing.T) {
-	constraint := NewMinRuntimeConstraint("min-30s", 30*time.Second)
-
-	ctx := createTestExecutionContext()
-	// Don't set StartTime or EndTime
-
-	_, err := constraint.Check(ctx)
-	if err == nil {
-		t.Fatal("Expected error about missing timing, got nil")
-	}
-
-	if err.Error() != "start/end time not available" {
-		t.Errorf("Expected 'start/end time not available', got: %s", err.Error())
-	}
-}
-
-func TestMinRuntime_EvaluationPhase(t *testing.T) {
-	constraint := NewMinRuntimeConstraint("min-30s", 30*time.Second)
-	timing := constraint.EvaluationTiming()
-
-	if len(timing) != 1 {
-		t.Fatalf("Expected 1 phase, got %d", len(timing))
-	}
-
-	if timing[0] != EvaluationPhasePostExecution {
-		t.Errorf("Expected EvaluationPhasePostExecution, got %s", timing[0])
-	}
-}
-
-// ========================
-// 8. AlwaysPassConstraint Tests
+// 7. AlwaysPassConstraint Tests
 // ========================
 
 func TestAlwaysPassConstraint_AlwaysReturnsTrue(t *testing.T) {
@@ -1823,7 +1693,7 @@ func TestConstraintChecker_CheckDuringExecution_OnlyRunsDuringPhase(t *testing.T
 }
 
 func TestConstraintChecker_CheckPostExecution_OnlyRunsPostPhase(t *testing.T) {
-	startTime := time.Now().Add(-1 * time.Minute)
+	startTime := time.Now().Add(-10 * time.Second)
 	endTime := time.Now()
 
 	constraints := []ConstraintWithActions{
@@ -1836,7 +1706,7 @@ func TestConstraintChecker_CheckPostExecution_OnlyRunsPostPhase(t *testing.T) {
 			OnMet:      []Action{NewNoOpAction("during-action")},
 		},
 		{
-			Constraint: NewMinRuntimeConstraint("post", 30*time.Second),
+			Constraint: NewMaxRuntimeConstraint("post", 2*time.Minute),
 			OnMet:      []Action{NewNoOpAction("post-action")},
 		},
 	}
@@ -1890,12 +1760,12 @@ func TestConstraintChecker_CheckDuringExecution_RequiresStartTime(t *testing.T) 
 }
 
 func TestConstraintChecker_CheckPostExecution_RequiresTiming(t *testing.T) {
-	startTime := time.Now().Add(-1 * time.Minute)
+	startTime := time.Now().Add(-10 * time.Second)
 	endTime := time.Now()
 
 	constraints := []ConstraintWithActions{
 		{
-			Constraint: NewMinRuntimeConstraint("min-runtime", 30*time.Second),
+			Constraint: NewMaxRuntimeConstraint("max-runtime", 2*time.Minute),
 		},
 	}
 
@@ -1912,7 +1782,7 @@ func TestConstraintChecker_CheckPostExecution_RequiresTiming(t *testing.T) {
 	}
 
 	if !result.ShouldProceed {
-		t.Errorf("Expected ShouldProceed=true (meets minimum runtime)")
+		t.Errorf("Expected ShouldProceed=true (within max runtime)")
 	}
 }
 

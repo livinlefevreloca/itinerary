@@ -650,14 +650,11 @@ func TestScheduler_CleanupOrchestrators_SkipsActive(t *testing.T) {
 	nonTerminalStates := []OrchestratorStatus{
 		OrchestratorPreRun,
 		OrchestratorPending,
-		OrchestratorConditionPending,
 		OrchestratorConditionRunning,
-		OrchestratorActionPending,
 		OrchestratorActionRunning,
 		OrchestratorContainerCreating,
 		OrchestratorRunning,
 		OrchestratorTerminating,
-		OrchestratorRetrying,
 	}
 
 	for i, status := range nonTerminalStates {

@@ -70,17 +70,14 @@ func TestStatePaths_WithConstraints(t *testing.T) {
 	)
 	orch.recorder = recorder
 
-	// Step through constraint checking path
+	// Step through constraint checking path (no more condition_pending)
 	preRun := &PreRunState{}
 	orch.transitionTo(preRun)
 
 	pending := preRun.ToPending()
 	orch.transitionTo(pending)
 
-	conditionPending := pending.ToConditionPending()
-	orch.transitionTo(conditionPending)
-
-	conditionRunning := conditionPending.ToConditionRunning()
+	conditionRunning := pending.ToConditionRunning()
 	orch.transitionTo(conditionRunning)
 
 	containerCreating := conditionRunning.ToContainerCreating()
@@ -99,7 +96,6 @@ func TestStatePaths_WithConstraints(t *testing.T) {
 	expected := []string{
 		"prerun",
 		"pending",
-		"condition_pending",
 		"condition_running",
 		"container_creating",
 		"running",
@@ -122,23 +118,17 @@ func TestStatePaths_WithActions(t *testing.T) {
 	)
 	orch.recorder = recorder
 
-	// Step through action execution path
+	// Step through action execution path (no more pending intermediates)
 	preRun := &PreRunState{}
 	orch.transitionTo(preRun)
 
 	pending := preRun.ToPending()
 	orch.transitionTo(pending)
 
-	conditionPending := pending.ToConditionPending()
-	orch.transitionTo(conditionPending)
-
-	conditionRunning := conditionPending.ToConditionRunning()
+	conditionRunning := pending.ToConditionRunning()
 	orch.transitionTo(conditionRunning)
 
-	actionPending := conditionRunning.ToActionPending()
-	orch.transitionTo(actionPending)
-
-	actionRunning := actionPending.ToActionRunning()
+	actionRunning := conditionRunning.ToActionRunning()
 	orch.transitionTo(actionRunning)
 
 	containerCreating := actionRunning.ToContainerCreating()
@@ -157,9 +147,7 @@ func TestStatePaths_WithActions(t *testing.T) {
 	expected := []string{
 		"prerun",
 		"pending",
-		"condition_pending",
 		"condition_running",
-		"action_pending",
 		"action_running",
 		"container_creating",
 		"running",
@@ -169,7 +157,7 @@ func TestStatePaths_WithActions(t *testing.T) {
 	assert.Equal(t, expected, recorder.Path())
 }
 
-// TestStatePaths_WithRetry verifies path with retry
+// TestStatePaths_WithRetry verifies path with retry (goes back to pending via terminating)
 func TestStatePaths_WithRetry(t *testing.T) {
 	recorder := NewStateRecorder()
 	orch := NewOrchestrator(
@@ -188,7 +176,7 @@ func TestStatePaths_WithRetry(t *testing.T) {
 	)
 	orch.recorder = recorder
 
-	// Step through retry path
+	// Step through retry path (no more retrying state)
 	preRun := &PreRunState{}
 	orch.transitionTo(preRun)
 
@@ -204,12 +192,8 @@ func TestStatePaths_WithRetry(t *testing.T) {
 	terminating := running.ToTerminating()
 	orch.transitionTo(terminating)
 
-	// First attempt fails
-	retrying := terminating.ToRetrying()
-	orch.transitionTo(retrying)
-
-	// Retry - go back to pending (skip constraint recheck)
-	pending2 := retrying.ToPending()
+	// First attempt fails, retry via terminating -> pending
+	pending2 := terminating.ToPending()
 	orch.transitionTo(pending2)
 
 	containerCreating2 := pending2.ToContainerCreating()
@@ -232,7 +216,6 @@ func TestStatePaths_WithRetry(t *testing.T) {
 		"container_creating",
 		"running",
 		"terminating",
-		"retrying",
 		"pending",
 		"container_creating",
 		"running",

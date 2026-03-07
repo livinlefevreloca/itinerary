@@ -15,8 +15,8 @@ func (s *PreRunState) ToCancelled() *CancelledState {
 type PendingState struct{}
 
 func (s *PendingState) Name() string { return "pending" }
-func (s *PendingState) ToConditionPending() *ConditionPendingState {
-	return &ConditionPendingState{}
+func (s *PendingState) ToConditionRunning() *ConditionRunningState {
+	return &ConditionRunningState{}
 }
 func (s *PendingState) ToContainerCreating() *ContainerCreatingState {
 	return &ContainerCreatingState{}
@@ -25,23 +25,12 @@ func (s *PendingState) ToCancelled() *CancelledState {
 	return &CancelledState{}
 }
 
-// ConditionPendingState - about to check pre-execution requirements
-type ConditionPendingState struct{}
-
-func (s *ConditionPendingState) Name() string { return "condition_pending" }
-func (s *ConditionPendingState) ToConditionRunning() *ConditionRunningState {
-	return &ConditionRunningState{}
-}
-func (s *ConditionPendingState) ToCancelled() *CancelledState {
-	return &CancelledState{}
-}
-
 // ConditionRunningState - checking pre-execution requirements
 type ConditionRunningState struct{}
 
 func (s *ConditionRunningState) Name() string { return "condition_running" }
-func (s *ConditionRunningState) ToActionPending() *ActionPendingState {
-	return &ActionPendingState{}
+func (s *ConditionRunningState) ToActionRunning() *ActionRunningState {
+	return &ActionRunningState{}
 }
 func (s *ConditionRunningState) ToContainerCreating() *ContainerCreatingState {
 	return &ContainerCreatingState{}
@@ -50,17 +39,6 @@ func (s *ConditionRunningState) ToFailed() *FailedState {
 	return &FailedState{}
 }
 func (s *ConditionRunningState) ToCancelled() *CancelledState {
-	return &CancelledState{}
-}
-
-// ActionPendingState - requirement failed, about to take action
-type ActionPendingState struct{}
-
-func (s *ActionPendingState) Name() string { return "action_pending" }
-func (s *ActionPendingState) ToActionRunning() *ActionRunningState {
-	return &ActionRunningState{}
-}
-func (s *ActionPendingState) ToCancelled() *CancelledState {
 	return &CancelledState{}
 }
 
@@ -91,9 +69,6 @@ func (s *ContainerCreatingState) ToRunning() *RunningState {
 func (s *ContainerCreatingState) ToFailed() *FailedState {
 	return &FailedState{}
 }
-func (s *ContainerCreatingState) ToRetrying() *RetryingState {
-	return &RetryingState{}
-}
 func (s *ContainerCreatingState) ToCancelled() *CancelledState {
 	return &CancelledState{}
 }
@@ -119,27 +94,10 @@ func (s *TerminatingState) ToCompleted() *CompletedState {
 func (s *TerminatingState) ToFailed() *FailedState {
 	return &FailedState{}
 }
-func (s *TerminatingState) ToRetrying() *RetryingState {
-	return &RetryingState{}
-}
-func (s *TerminatingState) ToCancelled() *CancelledState {
-	return &CancelledState{}
-}
-
-// RetryingState - after failure, before retry
-type RetryingState struct{}
-
-func (s *RetryingState) Name() string { return "retrying" }
-func (s *RetryingState) ToConditionPending() *ConditionPendingState {
-	return &ConditionPendingState{}
-}
-func (s *RetryingState) ToPending() *PendingState {
+func (s *TerminatingState) ToPending() *PendingState {
 	return &PendingState{}
 }
-func (s *RetryingState) ToFailed() *FailedState {
-	return &FailedState{}
-}
-func (s *RetryingState) ToCancelled() *CancelledState {
+func (s *TerminatingState) ToCancelled() *CancelledState {
 	return &CancelledState{}
 }
 
@@ -154,8 +112,8 @@ func (s *CompletedState) Name() string { return "completed" }
 type FailedState struct{}
 
 func (s *FailedState) Name() string { return "failed" }
-func (s *FailedState) ToRetrying() *RetryingState {
-	return &RetryingState{}
+func (s *FailedState) ToPending() *PendingState {
+	return &PendingState{}
 }
 
 // CancelledState - cancelled

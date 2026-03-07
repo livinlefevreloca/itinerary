@@ -13,18 +13,13 @@ const (
 	// Pre-execution states
 	OrchestratorPreRun           OrchestratorStatus = iota // Created, waiting for start time
 	OrchestratorPending                                    // Initial pre-execution phase
-	OrchestratorConditionPending                           // About to check pre-execution requirements
 	OrchestratorConditionRunning                           // Checking pre-execution requirements
-	OrchestratorActionPending                              // Requirement failed, about to take action
 	OrchestratorActionRunning                              // Taking action based on requirement outcome
 
 	// Execution states
 	OrchestratorContainerCreating // Creating Kubernetes pod/container
 	OrchestratorRunning           // Job executing
 	OrchestratorTerminating       // Job finishing/cleanup
-
-	// Retry state
-	OrchestratorRetrying // After failure, before retry
 
 	// Terminal states
 	OrchestratorCompleted // Completed successfully
@@ -40,12 +35,8 @@ func (s OrchestratorStatus) String() string {
 		return "prerun"
 	case OrchestratorPending:
 		return "pending"
-	case OrchestratorConditionPending:
-		return "condition_pending"
 	case OrchestratorConditionRunning:
 		return "condition_running"
-	case OrchestratorActionPending:
-		return "action_pending"
 	case OrchestratorActionRunning:
 		return "action_running"
 	case OrchestratorContainerCreating:
@@ -54,8 +45,6 @@ func (s OrchestratorStatus) String() string {
 		return "running"
 	case OrchestratorTerminating:
 		return "terminating"
-	case OrchestratorRetrying:
-		return "retrying"
 	case OrchestratorCompleted:
 		return "completed"
 	case OrchestratorFailed:
