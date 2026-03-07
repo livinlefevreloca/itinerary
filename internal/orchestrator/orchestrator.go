@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/constraints"
 	"github.com/livinlefevreloca/itinerary/internal/db"
 	"k8s.io/client-go/kubernetes"
 )
@@ -25,7 +26,7 @@ type Orchestrator struct {
 	configUpdate chan *db.Job
 
 	// Dependencies
-	constraintChecker ConstraintChecker
+	constraintChecker constraints.ConstraintChecker
 	k8sClient         kubernetes.Interface
 	logger            *slog.Logger
 
@@ -49,7 +50,7 @@ func NewOrchestrator(
 	runID string,
 	jobConfig *db.Job,
 	scheduledAt time.Time,
-	constraintChecker ConstraintChecker,
+	checker constraints.ConstraintChecker,
 	k8sClient kubernetes.Interface,
 	logger *slog.Logger,
 ) *Orchestrator {
@@ -61,7 +62,7 @@ func NewOrchestrator(
 		state:             &PreRunState{},
 		cancelChan:        make(chan struct{}),
 		configUpdate:      make(chan *db.Job, 1),
-		constraintChecker: constraintChecker,
+		constraintChecker: checker,
 		k8sClient:         k8sClient,
 		logger:            logger,
 		timing: PhaseTiming{

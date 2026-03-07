@@ -1,11 +1,6 @@
 package orchestrator
 
-import (
-	"context"
-	"time"
-
-	"github.com/livinlefevreloca/itinerary/internal/db"
-)
+import "time"
 
 // OrchestratorStatus represents the current state of an orchestrator
 type OrchestratorStatus int
@@ -57,24 +52,6 @@ func (s OrchestratorStatus) String() string {
 	default:
 		return "unknown"
 	}
-}
-
-// ConstraintCheckResult is returned by constraint checker
-type ConstraintCheckResult struct {
-	ShouldProceed bool   // false if constraints prevent execution
-	Message       string // Summary of constraint evaluation and actions taken
-}
-
-// ConstraintChecker evaluates pre and post execution constraints
-type ConstraintChecker interface {
-	// CheckPreExecution evaluates all pre-execution constraints
-	CheckPreExecution(ctx context.Context, job *db.Job, runID string) (ConstraintCheckResult, error)
-
-	// CheckPostExecution evaluates all post-execution constraints
-	CheckPostExecution(ctx context.Context, job *db.Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error)
-
-	// ShouldRecheckOnRetry returns true if any constraints need to be re-evaluated on retry
-	ShouldRecheckOnRetry(job *db.Job) bool
 }
 
 // OrchestratorHeartbeatMsg is sent periodically to prove liveness

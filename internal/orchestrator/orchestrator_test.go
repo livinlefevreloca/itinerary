@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/constraints"
 	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 	"github.com/stretchr/testify/assert"
@@ -36,12 +37,16 @@ func createNoOpConstraintChecker() *NoOpConstraintChecker {
 // NoOpConstraintChecker implements ConstraintChecker with no-op behavior
 type NoOpConstraintChecker struct{}
 
-func (n *NoOpConstraintChecker) CheckPreExecution(ctx context.Context, job *db.Job, runID string) (ConstraintCheckResult, error) {
-	return ConstraintCheckResult{ShouldProceed: true, Message: "no constraints"}, nil
+func (n *NoOpConstraintChecker) CheckPreExecution(ctx context.Context, job *db.Job, runID string) (constraints.ConstraintCheckResult, error) {
+	return constraints.ConstraintCheckResult{ShouldProceed: true, Message: "no constraints"}, nil
 }
 
-func (n *NoOpConstraintChecker) CheckPostExecution(ctx context.Context, job *db.Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error) {
-	return ConstraintCheckResult{ShouldProceed: true, Message: "no constraints"}, nil
+func (n *NoOpConstraintChecker) CheckDuringExecution(ctx context.Context, job *db.Job, runID string, startTime time.Time) (constraints.ConstraintCheckResult, error) {
+	return constraints.ConstraintCheckResult{ShouldProceed: true, Message: "no constraints"}, nil
+}
+
+func (n *NoOpConstraintChecker) CheckPostExecution(ctx context.Context, job *db.Job, runID string, startTime, endTime time.Time, exitCode int) (constraints.ConstraintCheckResult, error) {
+	return constraints.ConstraintCheckResult{ShouldProceed: true, Message: "no constraints"}, nil
 }
 
 func (n *NoOpConstraintChecker) ShouldRecheckOnRetry(job *db.Job) bool {
@@ -74,17 +79,25 @@ type MockConstraintChecker struct {
 	checkCount     int
 }
 
-func (m *MockConstraintChecker) CheckPreExecution(ctx context.Context, job *db.Job, runID string) (ConstraintCheckResult, error) {
+func (m *MockConstraintChecker) CheckPreExecution(ctx context.Context, job *db.Job, runID string) (constraints.ConstraintCheckResult, error) {
 	m.checkCount++
-	return ConstraintCheckResult{
+	return constraints.ConstraintCheckResult{
 		ShouldProceed: m.shouldProceed,
 		Message:       "mock result",
 	}, m.err
 }
 
-func (m *MockConstraintChecker) CheckPostExecution(ctx context.Context, job *db.Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error) {
+func (m *MockConstraintChecker) CheckDuringExecution(ctx context.Context, job *db.Job, runID string, startTime time.Time) (constraints.ConstraintCheckResult, error) {
 	m.checkCount++
-	return ConstraintCheckResult{
+	return constraints.ConstraintCheckResult{
+		ShouldProceed: m.shouldProceed,
+		Message:       "mock result",
+	}, m.err
+}
+
+func (m *MockConstraintChecker) CheckPostExecution(ctx context.Context, job *db.Job, runID string, startTime, endTime time.Time, exitCode int) (constraints.ConstraintCheckResult, error) {
+	m.checkCount++
+	return constraints.ConstraintCheckResult{
 		ShouldProceed: m.shouldProceed,
 		Message:       "mock result",
 	}, m.err
