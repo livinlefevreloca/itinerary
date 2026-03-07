@@ -3,6 +3,7 @@ package scheduler
 import (
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/inbox"
 )
 
@@ -93,7 +94,7 @@ type CancelRunMsg struct {
 // UpdateRunConfigMsg updates the configuration for a job while in PreRun state
 type UpdateRunConfigMsg struct {
 	RunID     string
-	NewConfig *Job
+	NewConfig *db.Job
 }
 
 // GetOrchestratorStateMsg requests the state of a specific orchestrator

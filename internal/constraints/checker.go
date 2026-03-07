@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/db"
 )
 
 // DefaultConstraintChecker implements the ConstraintChecker interface
@@ -32,19 +34,19 @@ func NewConstraintChecker(
 	}
 }
 
-func (c *DefaultConstraintChecker) CheckPreExecution(ctx context.Context, job *Job, runID string) (ConstraintCheckResult, error) {
+func (c *DefaultConstraintChecker) CheckPreExecution(ctx context.Context, job *db.Job, runID string) (ConstraintCheckResult, error) {
 	return c.checkConstraints(ctx, job, runID, EvaluationPhasePreExecution, nil, nil, nil)
 }
 
-func (c *DefaultConstraintChecker) CheckDuringExecution(ctx context.Context, job *Job, runID string, startTime time.Time) (ConstraintCheckResult, error) {
+func (c *DefaultConstraintChecker) CheckDuringExecution(ctx context.Context, job *db.Job, runID string, startTime time.Time) (ConstraintCheckResult, error) {
 	return c.checkConstraints(ctx, job, runID, EvaluationPhaseDuringExecution, &startTime, nil, nil)
 }
 
-func (c *DefaultConstraintChecker) CheckPostExecution(ctx context.Context, job *Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error) {
+func (c *DefaultConstraintChecker) CheckPostExecution(ctx context.Context, job *db.Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error) {
 	return c.checkConstraints(ctx, job, runID, EvaluationPhasePostExecution, &startTime, &endTime, &exitCode)
 }
 
-func (c *DefaultConstraintChecker) ShouldRecheckOnRetry(job *Job) bool {
+func (c *DefaultConstraintChecker) ShouldRecheckOnRetry(job *db.Job) bool {
 	for _, cwa := range c.constraints {
 		if cwa.RecheckOnRetry {
 			return true
@@ -55,7 +57,7 @@ func (c *DefaultConstraintChecker) ShouldRecheckOnRetry(job *Job) bool {
 
 func (c *DefaultConstraintChecker) checkConstraints(
 	ctx context.Context,
-	job *Job,
+	job *db.Job,
 	runID string,
 	phase EvaluationPhase,
 	startTime *time.Time,
@@ -123,7 +125,7 @@ func (c *DefaultConstraintChecker) appliesToPhase(constraint Constraint, phase E
 
 func (c *DefaultConstraintChecker) buildExecutionContext(
 	ctx context.Context,
-	job *Job,
+	job *db.Job,
 	runID string,
 	startTime *time.Time,
 	endTime *time.Time,

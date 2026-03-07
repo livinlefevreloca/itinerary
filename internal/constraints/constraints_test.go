@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -1259,7 +1260,7 @@ func TestConstraintChecker_SingleConstraintMet(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1288,7 +1289,7 @@ func TestConstraintChecker_SingleConstraintViolated(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1324,7 +1325,7 @@ func TestConstraintChecker_MultipleConstraintsAllMet(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1360,7 +1361,7 @@ func TestConstraintChecker_MultipleConstraintsOneFails(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1380,7 +1381,7 @@ func TestConstraintChecker_NoConstraints(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1412,7 +1413,7 @@ func TestConstraintChecker_MultipleActionsOnViolation(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1449,7 +1450,7 @@ func TestConstraintChecker_ShouldRecheckOnRetry_True(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	if !checker.ShouldRecheckOnRetry(&Job{ID: "test-job"}) {
+	if !checker.ShouldRecheckOnRetry(&db.Job{ID: "test-job"}) {
 		t.Error("Expected ShouldRecheckOnRetry=true (one constraint has recheck=true)")
 	}
 }
@@ -1473,7 +1474,7 @@ func TestConstraintChecker_ShouldRecheckOnRetry_False(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	if checker.ShouldRecheckOnRetry(&Job{ID: "test-job"}) {
+	if checker.ShouldRecheckOnRetry(&db.Job{ID: "test-job"}) {
 		t.Error("Expected ShouldRecheckOnRetry=false (all constraints have recheck=false)")
 	}
 }
@@ -1488,7 +1489,7 @@ func TestConstraintChecker_ShouldRecheckOnRetry_NoConstraints(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	if checker.ShouldRecheckOnRetry(&Job{ID: "test-job"}) {
+	if checker.ShouldRecheckOnRetry(&db.Job{ID: "test-job"}) {
 		t.Error("Expected ShouldRecheckOnRetry=false (no constraints)")
 	}
 }
@@ -1520,7 +1521,7 @@ func TestConstraintChecker_CheckPreExecution_OnlyRunsPrePhase(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1560,7 +1561,7 @@ func TestConstraintChecker_CheckDuringExecution_OnlyRunsDuringPhase(t *testing.T
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckDuringExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime)
+	result, err := checker.CheckDuringExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1601,7 +1602,7 @@ func TestConstraintChecker_CheckPostExecution_OnlyRunsPostPhase(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPostExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
+	result, err := checker.CheckPostExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1632,7 +1633,7 @@ func TestConstraintChecker_CheckDuringExecution_RequiresStartTime(t *testing.T) 
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckDuringExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime)
+	result, err := checker.CheckDuringExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1659,7 +1660,7 @@ func TestConstraintChecker_CheckPostExecution_RequiresTiming(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPostExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
+	result, err := checker.CheckPostExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1689,7 +1690,7 @@ func TestConstraintChecker_MultiplePhaseConstraint(t *testing.T) {
 	)
 
 	// Should run in pre-execution
-	result, err := checker.CheckPreExecution(context.Background(), &Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Pre-execution: Expected no error, got: %v", err)
 	}
@@ -1699,7 +1700,7 @@ func TestConstraintChecker_MultiplePhaseConstraint(t *testing.T) {
 
 	// Should NOT run in during-execution
 	startTime := time.Now()
-	result, err = checker.CheckDuringExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime)
+	result, err = checker.CheckDuringExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime)
 	if err != nil {
 		t.Fatalf("During-execution: Expected no error, got: %v", err)
 	}
@@ -1709,7 +1710,7 @@ func TestConstraintChecker_MultiplePhaseConstraint(t *testing.T) {
 
 	// Should run in post-execution
 	endTime := time.Now()
-	result, err = checker.CheckPostExecution(context.Background(), &Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
+	result, err = checker.CheckPostExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
 	if err != nil {
 		t.Fatalf("Post-execution: Expected no error, got: %v", err)
 	}

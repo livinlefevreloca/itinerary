@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/db"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -13,7 +14,7 @@ type Orchestrator struct {
 	// Core identification
 	runID       string
 	jobID       string
-	jobConfig   *Job
+	jobConfig   *db.Job
 	scheduledAt time.Time
 
 	// State management
@@ -21,16 +22,12 @@ type Orchestrator struct {
 
 	// Communication channels
 	cancelChan   chan struct{}
-	configUpdate chan *Job
+	configUpdate chan *db.Job
 
 	// Dependencies
 	constraintChecker ConstraintChecker
 	k8sClient         kubernetes.Interface
 	logger            *slog.Logger
-
-	// Retry tracking
-	retryAttempt int
-	maxRetries   int
 
 	// Phase timing
 	timing PhaseTiming
@@ -47,22 +44,15 @@ type Orchestrator struct {
 	recorder *StateRecorder
 }
 
-// No more allowedTransitions map - enforced by type system!
-
 // NewOrchestrator creates a new orchestrator instance
 func NewOrchestrator(
 	runID string,
-	jobConfig *Job,
+	jobConfig *db.Job,
 	scheduledAt time.Time,
 	constraintChecker ConstraintChecker,
 	k8sClient kubernetes.Interface,
 	logger *slog.Logger,
 ) *Orchestrator {
-	maxRetries := 0
-	if jobConfig.RetryConfig != nil {
-		maxRetries = jobConfig.RetryConfig.MaxRetries
-	}
-
 	return &Orchestrator{
 		runID:             runID,
 		jobID:             jobConfig.ID,
@@ -70,11 +60,10 @@ func NewOrchestrator(
 		scheduledAt:       scheduledAt,
 		state:             &PreRunState{},
 		cancelChan:        make(chan struct{}),
-		configUpdate:      make(chan *Job, 1),
+		configUpdate:      make(chan *db.Job, 1),
 		constraintChecker: constraintChecker,
 		k8sClient:         k8sClient,
 		logger:            logger,
-		maxRetries:        maxRetries,
 		timing: PhaseTiming{
 			CreatedAt: time.Now(),
 		},
@@ -92,7 +81,7 @@ func (o *Orchestrator) Cancel() {
 }
 
 // UpdateConfig sends a config update to the orchestrator
-func (o *Orchestrator) UpdateConfig(newConfig *Job) {
+func (o *Orchestrator) UpdateConfig(newConfig *db.Job) {
 	select {
 	case o.configUpdate <- newConfig:
 	default:
@@ -214,16 +203,10 @@ func (o *Orchestrator) runPreRun() {
 func (o *Orchestrator) runPending() {
 	state := o.state.(*PendingState)
 
-	// Check if we need to run constraint checks
-	if len(o.jobConfig.ConstraintConfig) > 0 {
-		// Transition directly to constraint running
-		o.timing.ConstraintCheckStarted = time.Now()
-		o.transitionTo(state.ToConditionRunning())
-	} else {
-		// No constraints, go directly to container creation
-		o.timing.ExecutionStartedAt = time.Now()
-		o.transitionTo(state.ToContainerCreating())
-	}
+	// Always run through constraint checking — the checker handles
+	// the case where no constraints are configured
+	o.timing.ConstraintCheckStarted = time.Now()
+	o.transitionTo(state.ToConditionRunning())
 }
 
 // runConditionRunning executes constraint checks
@@ -295,8 +278,6 @@ func (o *Orchestrator) runCompleted() {
 	o.logger.Info("orchestrator completed successfully",
 		"runID", o.runID,
 		"jobID", o.jobID)
-	// TODO: Send completion message
-	// TODO: Submit metrics
 }
 
 // runFailed handles failure
@@ -305,8 +286,6 @@ func (o *Orchestrator) runFailed() {
 		"runID", o.runID,
 		"jobID", o.jobID,
 		"error", o.err)
-	// TODO: Send completion message
-	// TODO: Submit metrics
 }
 
 // runCancelled handles cancellation
@@ -314,9 +293,6 @@ func (o *Orchestrator) runCancelled() {
 	o.logger.Info("orchestrator cancelled",
 		"runID", o.runID,
 		"jobID", o.jobID)
-	// TODO: Clean up any resources
-	// TODO: Send completion message
-	// TODO: Submit metrics
 }
 
 // runOrphaned handles orphaned state
@@ -324,6 +300,4 @@ func (o *Orchestrator) runOrphaned() {
 	o.logger.Info("orchestrator orphaned",
 		"runID", o.runID,
 		"jobID", o.jobID)
-	// TODO: Send completion message
-	// TODO: Submit metrics
 }

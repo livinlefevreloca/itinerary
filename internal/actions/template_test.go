@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -222,7 +223,7 @@ func TestRenderPayload_EmptyObject(t *testing.T) {
 // TestBuildTemplateData_AllFields tests building template data with all fields
 func TestBuildTemplateData_AllFields(t *testing.T) {
 	ctx := NewExecutionContextBuilder().
-		WithJob(&Job{ID: "job-123", Name: "test-job"}).
+		WithJob(&db.Job{ID: "job-123", Name: "test-job"}).
 		WithRunID("run-456").
 		WithCommand("deploy.sh").
 		WithArgs([]string{"arg1", "arg2"}).
@@ -313,7 +314,7 @@ func TestWebhookAction_TemplateInURL(t *testing.T) {
 	}
 
 	ctx := NewExecutionContextBuilder().
-		WithJob(&Job{ID: "job-123"}).
+		WithJob(&db.Job{ID: "job-123"}).
 		WithWebhookHandler(mockHandler).
 		Build()
 
@@ -346,7 +347,7 @@ func TestWebhookAction_TemplateInPayload(t *testing.T) {
 	}
 
 	ctx := NewExecutionContextBuilder().
-		WithJob(&Job{ID: "job-123"}).
+		WithJob(&db.Job{ID: "job-123"}).
 		WithRunID("run-456").
 		WithWebhookHandler(mockHandler).
 		Build()
@@ -385,7 +386,7 @@ func TestSlackAction_TemplateInText(t *testing.T) {
 	}
 
 	ctx := NewExecutionContextBuilder().
-		WithJob(&Job{Name: "deploy-prod"}).
+		WithJob(&db.Job{Name: "deploy-prod"}).
 		WithWebhookHandler(mockHandler).
 		Build()
 
@@ -457,7 +458,7 @@ func TestMetricAction_TemplateInName(t *testing.T) {
 	}
 
 	ctx := NewExecutionContextBuilder().
-		WithJob(&Job{Name: "deploy"}).
+		WithJob(&db.Job{Name: "deploy"}).
 		WithMetricRecorder(mockRecorder).
 		Build()
 
@@ -521,7 +522,7 @@ func TestMetricAction_TemplateInTags(t *testing.T) {
 	}
 
 	ctx := NewExecutionContextBuilder().
-		WithJob(&Job{ID: "job-123"}).
+		WithJob(&db.Job{ID: "job-123"}).
 		WithRunID("run-456").
 		WithMetricRecorder(mockRecorder).
 		Build()

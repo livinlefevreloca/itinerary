@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -35,7 +36,7 @@ func TestIntegration_ScheduleAndExecuteJob(t *testing.T) {
 	mockDB := testutil.NewMockDB()
 
 	// Schedule job to run every minute so it executes soon
-	mockDB.SetJobs([]*testutil.Job{
+	mockDB.SetJobs([]*db.Job{
 		{ID: "job1", Schedule: "* * * * *"}, // Every minute
 	})
 
@@ -95,7 +96,7 @@ func TestIntegration_MultipleJobsOverlapping(t *testing.T) {
 	mockDB := testutil.NewMockDB()
 
 	// Create 3 jobs all scheduled to run every minute
-	mockDB.SetJobs([]*testutil.Job{
+	mockDB.SetJobs([]*db.Job{
 		{ID: "job1", Schedule: "* * * * *"}, // Every minute
 		{ID: "job2", Schedule: "* * * * *"}, // Every minute
 		{ID: "job3", Schedule: "* * * * *"}, // Every minute

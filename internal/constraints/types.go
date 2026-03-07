@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/db"
 )
 
 // EvaluationPhase defines when a constraint should be evaluated
@@ -50,7 +52,7 @@ type Action interface {
 // ExecutionContext provides dependencies to constraints and actions
 type ExecutionContext struct {
 	// Job information
-	Job   *Job
+	Job   *db.Job
 	RunID string
 
 	// Execution timing (for during/post execution checks)
@@ -74,12 +76,6 @@ type ExecutionContext struct {
 // MessageSender sends messages to the scheduler
 type MessageSender interface {
 	Send(msg interface{}) error
-}
-
-// Job represents a job definition as seen by the constraints module
-type Job struct {
-	ID   string
-	Name string
 }
 
 // JobStateRequest queries the scheduler for job state
@@ -126,16 +122,16 @@ type ConstraintCheckResult struct {
 // ConstraintChecker evaluates constraints at various phases
 type ConstraintChecker interface {
 	// CheckPreExecution evaluates constraints before job starts
-	CheckPreExecution(ctx context.Context, job *Job, runID string) (ConstraintCheckResult, error)
+	CheckPreExecution(ctx context.Context, job *db.Job, runID string) (ConstraintCheckResult, error)
 
 	// CheckDuringExecution evaluates constraints while job is running
-	CheckDuringExecution(ctx context.Context, job *Job, runID string, startTime time.Time) (ConstraintCheckResult, error)
+	CheckDuringExecution(ctx context.Context, job *db.Job, runID string, startTime time.Time) (ConstraintCheckResult, error)
 
 	// CheckPostExecution evaluates constraints after job completes
-	CheckPostExecution(ctx context.Context, job *Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error)
+	CheckPostExecution(ctx context.Context, job *db.Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error)
 
 	// ShouldRecheckOnRetry returns whether constraints should be re-evaluated on retry
-	ShouldRecheckOnRetry(job *Job) bool
+	ShouldRecheckOnRetry(job *db.Job) bool
 }
 
 // ConstraintWithActions pairs a constraint with its associated actions

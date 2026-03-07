@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -16,7 +17,7 @@ func TestStatePaths_HappyPath(t *testing.T) {
 	recorder := NewStateRecorder()
 	orch := NewOrchestrator(
 		"test-run-id",
-		&Job{ID: "test-job", Name: "test"},
+		&db.Job{ID: "test-job", Name: "test"},
 		// Use past scheduled time so it starts immediately
 		// We'll test actual waiting in lifecycle tests
 		now().Add(-1*time.Second),
@@ -62,7 +63,7 @@ func TestStatePaths_WithConstraints(t *testing.T) {
 	recorder := NewStateRecorder()
 	orch := NewOrchestrator(
 		"test-run-id",
-		&Job{ID: "test-job", Name: "test"},
+		&db.Job{ID: "test-job", Name: "test"},
 		now().Add(-1*time.Second),
 		createMockConstraintChecker(true, nil),
 		createFakeK8sClient(),
@@ -110,7 +111,7 @@ func TestStatePaths_WithActions(t *testing.T) {
 	recorder := NewStateRecorder()
 	orch := NewOrchestrator(
 		"test-run-id",
-		&Job{ID: "test-job", Name: "test"},
+		&db.Job{ID: "test-job", Name: "test"},
 		now().Add(-1*time.Second),
 		createNoOpConstraintChecker(),
 		createFakeK8sClient(),
@@ -162,13 +163,7 @@ func TestStatePaths_WithRetry(t *testing.T) {
 	recorder := NewStateRecorder()
 	orch := NewOrchestrator(
 		"test-run-id",
-		&Job{
-			ID:   "test-job",
-			Name: "test",
-			RetryConfig: &RetryConfig{
-				MaxRetries: 2,
-			},
-		},
+		&db.Job{ID: "test-job", Name: "test"},
 		now().Add(-1*time.Second),
 		createNoOpConstraintChecker(),
 		createFakeK8sClient(),
@@ -291,7 +286,7 @@ func TestStatePaths_Cancellation(t *testing.T) {
 			recorder := NewStateRecorder()
 			orch := NewOrchestrator(
 				"test-run-id",
-				&Job{ID: "test-job", Name: "test"},
+				&db.Job{ID: "test-job", Name: "test"},
 				now().Add(-1*time.Second),
 				createNoOpConstraintChecker(),
 				createFakeK8sClient(),
@@ -314,7 +309,7 @@ func TestStatePaths_Failure(t *testing.T) {
 	recorder := NewStateRecorder()
 	orch := NewOrchestrator(
 		"test-run-id",
-		&Job{ID: "test-job", Name: "test"},
+		&db.Job{ID: "test-job", Name: "test"},
 		now().Add(-1*time.Second),
 		createNoOpConstraintChecker(),
 		createFakeK8sClient(),

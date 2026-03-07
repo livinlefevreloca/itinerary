@@ -2,8 +2,9 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/db"
 )
 
 // OrchestratorStatus represents the current state of an orchestrator
@@ -58,29 +59,6 @@ func (s OrchestratorStatus) String() string {
 	}
 }
 
-// Job represents a job definition
-type Job struct {
-	ID       string
-	Name     string
-	Schedule string
-	PodSpec  string
-
-	// Opaque to orchestrator - interpreted by constraint/action modules
-	ConstraintConfig json.RawMessage
-	ActionConfig     json.RawMessage
-
-	// Orchestrator needs to understand this for retry coordination
-	RetryConfig *RetryConfig
-}
-
-// RetryConfig defines retry behavior for a job
-type RetryConfig struct {
-	MaxRetries        int
-	InitialDelay      time.Duration
-	BackoffMultiplier float64
-	MaxDelay          time.Duration
-}
-
 // ConstraintCheckResult is returned by constraint checker
 type ConstraintCheckResult struct {
 	ShouldProceed bool   // false if constraints prevent execution
@@ -90,13 +68,13 @@ type ConstraintCheckResult struct {
 // ConstraintChecker evaluates pre and post execution constraints
 type ConstraintChecker interface {
 	// CheckPreExecution evaluates all pre-execution constraints
-	CheckPreExecution(ctx context.Context, job *Job, runID string) (ConstraintCheckResult, error)
+	CheckPreExecution(ctx context.Context, job *db.Job, runID string) (ConstraintCheckResult, error)
 
 	// CheckPostExecution evaluates all post-execution constraints
-	CheckPostExecution(ctx context.Context, job *Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error)
+	CheckPostExecution(ctx context.Context, job *db.Job, runID string, startTime, endTime time.Time, exitCode int) (ConstraintCheckResult, error)
 
 	// ShouldRecheckOnRetry returns true if any constraints need to be re-evaluated on retry
-	ShouldRecheckOnRetry(job *Job) bool
+	ShouldRecheckOnRetry(job *db.Job) bool
 }
 
 // OrchestratorHeartbeatMsg is sent periodically to prove liveness

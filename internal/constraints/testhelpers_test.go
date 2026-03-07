@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -27,7 +28,7 @@ func (n *NoOpAction) Name() string {
 // Helper to create ExecutionContext for tests
 func createTestExecutionContext() *ExecutionContext {
 	return &ExecutionContext{
-		Job:            &Job{ID: "test-job", Name: "test"},
+		Job:            &db.Job{ID: "test-job", Name: "test"},
 		RunID:          "test-run-id",
 		SchedulerInbox: testutil.NewMockSchedulerInbox(),
 		HTTPClient:     testutil.CreateTestHTTPClient(),

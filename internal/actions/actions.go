@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"text/template"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/db"
 )
 
 // Action interface that all action types must implement
@@ -23,7 +25,7 @@ type Action interface {
 // ExecutionContext provides dependencies to actions
 type ExecutionContext struct {
 	// Job information
-	Job   *Job
+	Job   *db.Job
 	RunID string
 
 	// Command execution details
@@ -45,12 +47,6 @@ type ExecutionContext struct {
 
 	// Cancellation
 	Context context.Context
-}
-
-// Job represents a job in the system
-type Job struct {
-	ID   string
-	Name string
 }
 
 // MessageSender interface for sending messages

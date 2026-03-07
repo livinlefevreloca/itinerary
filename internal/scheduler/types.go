@@ -3,27 +3,20 @@ package scheduler
 import (
 	"fmt"
 	"time"
-)
 
-// Job represents a job definition with schedule
-type Job struct {
-	ID       string
-	Name     string
-	Schedule string
-	PodSpec  string
-	// Add other fields as needed when we implement full job config
-}
+	"github.com/livinlefevreloca/itinerary/internal/db"
+)
 
 // OrchestratorState tracks the state of an orchestrator in the scheduler
 type OrchestratorState struct {
 	RunID            string
 	JobID            string
-	JobConfig        *Job // Current job configuration
+	JobConfig        *db.Job // Current job configuration
 	ScheduledAt      time.Time
 	ActualStart      time.Time
 	Status           OrchestratorStatus
 	CancelChan       chan struct{}
-	ConfigUpdate     chan *Job // For updating config while in PreRun
+	ConfigUpdate     chan *db.Job // For updating config while in PreRun
 	CompletedAt      time.Time
 	LastHeartbeat    time.Time // Last time heartbeat was received
 	MissedHeartbeats int       // Consecutive missed heartbeats

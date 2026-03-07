@@ -4,12 +4,13 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
 // ExecutionContextBuilder helps create ExecutionContext for testing
 type ExecutionContextBuilder struct {
-	job             *Job
+	job             *db.Job
 	runID           string
 	command         string
 	args            []string
@@ -24,7 +25,7 @@ type ExecutionContextBuilder struct {
 
 func NewExecutionContextBuilder() *ExecutionContextBuilder {
 	return &ExecutionContextBuilder{
-		job: &Job{
+		job: &db.Job{
 			ID:   "test-job-id",
 			Name: "test-job",
 		},
@@ -41,7 +42,7 @@ func NewExecutionContextBuilder() *ExecutionContextBuilder {
 	}
 }
 
-func (b *ExecutionContextBuilder) WithJob(job *Job) *ExecutionContextBuilder {
+func (b *ExecutionContextBuilder) WithJob(job *db.Job) *ExecutionContextBuilder {
 	b.job = job
 	return b
 }

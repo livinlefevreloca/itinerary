@@ -9,36 +9,30 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/db"
 )
 
 // MockDB provides a mock database for testing
 type MockDB struct {
 	mu             sync.Mutex
-	jobs           []*Job
-	writtenUpdates []interface{} // Store as interface{} to avoid import cycle
-	writtenStats   []interface{} // Store as interface{} to avoid import cycle
+	jobs           []*db.Job
+	writtenUpdates []interface{}
+	writtenStats   []interface{}
 	queryError     error
 	writeError     error
 	writeDelay     time.Duration
 }
 
-// Job represents a job definition for testing
-type Job struct {
-	ID       string
-	Name     string
-	Schedule string
-	PodSpec  string
-}
-
 func NewMockDB() *MockDB {
 	return &MockDB{
-		jobs:           make([]*Job, 0),
+		jobs:           make([]*db.Job, 0),
 		writtenUpdates: make([]interface{}, 0),
 		writtenStats:   make([]interface{}, 0),
 	}
 }
 
-func (m *MockDB) SetJobs(jobs []*Job) {
+func (m *MockDB) SetJobs(jobs []*db.Job) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.jobs = jobs
