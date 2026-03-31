@@ -3,10 +3,12 @@ package db
 import (
 	"database/sql"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // CreateJobRun creates a new job run record
-func (db *DB) CreateJobRun(run *JobRun) error {
+func (db *DB) CreateJobRun(run *model.JobRun) error {
 	query := `
 		INSERT INTO job_runs (job_id, run_id, scheduled_at, started_at, completed_at, status, success, error, trigger)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -28,8 +30,8 @@ func (db *DB) CreateJobRun(run *JobRun) error {
 }
 
 // GetJobRun retrieves a job run by job ID and scheduled time
-func (db *DB) GetJobRun(jobID string, scheduledAt time.Time) (*JobRun, error) {
-	run := &JobRun{}
+func (db *DB) GetJobRun(jobID string, scheduledAt time.Time) (*model.JobRun, error) {
+	run := &model.JobRun{}
 
 	query := `
 		SELECT job_id, run_id, scheduled_at, started_at, completed_at, status, success, error, trigger
@@ -61,8 +63,8 @@ func (db *DB) GetJobRun(jobID string, scheduledAt time.Time) (*JobRun, error) {
 }
 
 // GetJobRunByRunID retrieves a job run by its run ID
-func (db *DB) GetJobRunByRunID(runID string) (*JobRun, error) {
-	run := &JobRun{}
+func (db *DB) GetJobRunByRunID(runID string) (*model.JobRun, error) {
+	run := &model.JobRun{}
 
 	query := `
 		SELECT job_id, run_id, scheduled_at, started_at, completed_at, status, success, error, trigger
@@ -94,7 +96,7 @@ func (db *DB) GetJobRunByRunID(runID string) (*JobRun, error) {
 }
 
 // GetJobRuns retrieves all runs for a job
-func (db *DB) GetJobRuns(jobID string, limit int) ([]JobRun, error) {
+func (db *DB) GetJobRuns(jobID string, limit int) ([]model.JobRun, error) {
 	query := `
 		SELECT job_id, run_id, scheduled_at, started_at, completed_at, status, success, error, trigger
 		FROM job_runs
@@ -109,9 +111,9 @@ func (db *DB) GetJobRuns(jobID string, limit int) ([]JobRun, error) {
 	}
 	defer rows.Close()
 
-	var runs []JobRun
+	var runs []model.JobRun
 	for rows.Next() {
-		var run JobRun
+		var run model.JobRun
 		err := rows.Scan(
 			&run.JobID,
 			&run.RunID,
@@ -135,7 +137,7 @@ func (db *DB) GetJobRuns(jobID string, limit int) ([]JobRun, error) {
 
 	// Return empty slice instead of nil
 	if runs == nil {
-		runs = []JobRun{}
+		runs = []model.JobRun{}
 	}
 
 	return runs, nil

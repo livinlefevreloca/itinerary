@@ -13,19 +13,11 @@ type ScheduledRunIndex struct {
 }
 
 // NewScheduledRunIndex creates a new index from the given runs.
-// The runs are sorted by (ScheduledAt, JobID) before being stored.
-// The input slice is copied and sorted, so the caller can safely reuse it.
+// The runs are sorted in place by (ScheduledAt, JobID) before being stored.
 func NewScheduledRunIndex(runs []ScheduledRun) *ScheduledRunIndex {
 	idx := &ScheduledRunIndex{}
-
-	// Copy to avoid mutating the caller's slice during sort
-	sorted := make([]ScheduledRun, len(runs))
-	copy(sorted, runs)
-	sortRuns(sorted)
-
-	// Store sorted slice
-	idx.runs.Store(&sorted)
-
+	sortRuns(runs)
+	idx.runs.Store(&runs)
 	return idx
 }
 

@@ -7,24 +7,9 @@ type State interface {
 	Name() string
 }
 
-// StateRecorder tracks state transitions for testing
-type StateRecorder struct {
-	path []string
-}
-
-// NewStateRecorder creates a new StateRecorder
-func NewStateRecorder() *StateRecorder {
-	return &StateRecorder{path: make([]string, 0)}
-}
-
-// Record records a state transition
-func (r *StateRecorder) Record(state State) {
-	r.path = append(r.path, state.Name())
-}
-
-// Path returns the recorded state transition path
-func (r *StateRecorder) Path() []string {
-	return r.path
+// Recorder is an optional hook for recording state transitions, used in tests.
+type Recorder interface {
+	Record(name string)
 }
 
 // Phase timing boundaries (stored separately from states)

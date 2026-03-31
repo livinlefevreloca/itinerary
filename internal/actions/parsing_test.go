@@ -5,11 +5,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // TestCreateAction_DelayAction tests creating a DelayAction
 func TestCreateAction_DelayAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "delay",
 		Config: json.RawMessage(`{"duration":"1h"}`),
 	}
@@ -31,7 +33,7 @@ func TestCreateAction_DelayAction(t *testing.T) {
 
 // TestCreateAction_DelayAction_InvalidDuration tests error handling for invalid duration
 func TestCreateAction_DelayAction_InvalidDuration(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "delay",
 		Config: json.RawMessage(`{"duration":"invalid"}`),
 	}
@@ -48,7 +50,7 @@ func TestCreateAction_DelayAction_InvalidDuration(t *testing.T) {
 
 // TestCreateAction_WebhookAction tests creating a WebhookAction
 func TestCreateAction_WebhookAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "webhook",
 		Config: json.RawMessage(`{"url":"http://example.com","payload":{"key":"value"}}`),
 	}
@@ -70,7 +72,7 @@ func TestCreateAction_WebhookAction(t *testing.T) {
 
 // TestCreateAction_LogAction tests creating a LogAction
 func TestCreateAction_LogAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "log",
 		Config: json.RawMessage(`{"message":"test"}`),
 	}
@@ -92,7 +94,7 @@ func TestCreateAction_LogAction(t *testing.T) {
 
 // TestCreateAction_FailAction tests creating a FailAction
 func TestCreateAction_FailAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "fail",
 		Config: json.RawMessage(`{"reason":"test failure"}`),
 	}
@@ -114,7 +116,7 @@ func TestCreateAction_FailAction(t *testing.T) {
 
 // TestCreateAction_NoOpAction tests creating a NoOpAction
 func TestCreateAction_NoOpAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "noop",
 		Config: json.RawMessage(`{}`),
 	}
@@ -136,7 +138,7 @@ func TestCreateAction_NoOpAction(t *testing.T) {
 
 // TestCreateAction_RetryAction tests creating a RetryAction
 func TestCreateAction_RetryAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "retry",
 		Config: json.RawMessage(`{}`),
 	}
@@ -158,7 +160,7 @@ func TestCreateAction_RetryAction(t *testing.T) {
 
 // TestCreateAction_TriggerJobAction tests creating a TriggerJobAction
 func TestCreateAction_TriggerJobAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "trigger_job",
 		Config: json.RawMessage(`{"job_id":"job-123","args":{"key":"value"}}`),
 	}
@@ -180,7 +182,7 @@ func TestCreateAction_TriggerJobAction(t *testing.T) {
 
 // TestCreateAction_TriggerJobAction_MissingJobID tests error for missing job_id
 func TestCreateAction_TriggerJobAction_MissingJobID(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "trigger_job",
 		Config: json.RawMessage(`{"args":{}}`),
 	}
@@ -197,7 +199,7 @@ func TestCreateAction_TriggerJobAction_MissingJobID(t *testing.T) {
 
 // TestCreateAction_SlackAction tests creating a SlackAction
 func TestCreateAction_SlackAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "slack",
 		Config: json.RawMessage(`{"webhook_url":"https://hooks.slack.com/test","text":"alert"}`),
 	}
@@ -219,7 +221,7 @@ func TestCreateAction_SlackAction(t *testing.T) {
 
 // TestCreateAction_SlackAction_MissingWebhookURL tests error for missing webhook_url
 func TestCreateAction_SlackAction_MissingWebhookURL(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "slack",
 		Config: json.RawMessage(`{"text":"alert"}`),
 	}
@@ -236,7 +238,7 @@ func TestCreateAction_SlackAction_MissingWebhookURL(t *testing.T) {
 
 // TestCreateAction_PagerDutyAction tests creating a PagerDutyAction
 func TestCreateAction_PagerDutyAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "pagerduty",
 		Config: json.RawMessage(`{"routing_key":"key","severity":"error","summary":"alert"}`),
 	}
@@ -258,7 +260,7 @@ func TestCreateAction_PagerDutyAction(t *testing.T) {
 
 // TestCreateAction_PagerDutyAction_MissingRoutingKey tests error for missing routing_key
 func TestCreateAction_PagerDutyAction_MissingRoutingKey(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "pagerduty",
 		Config: json.RawMessage(`{"severity":"error"}`),
 	}
@@ -275,7 +277,7 @@ func TestCreateAction_PagerDutyAction_MissingRoutingKey(t *testing.T) {
 
 // TestCreateAction_KillAllInstancesAction tests creating a KillAllInstancesAction
 func TestCreateAction_KillAllInstancesAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "kill_all_instances",
 		Config: json.RawMessage(`{"job_id":"job-123"}`),
 	}
@@ -297,7 +299,7 @@ func TestCreateAction_KillAllInstancesAction(t *testing.T) {
 
 // TestCreateAction_KillAllInstancesAction_MissingJobID tests error for missing job_id
 func TestCreateAction_KillAllInstancesAction_MissingJobID(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "kill_all_instances",
 		Config: json.RawMessage(`{}`),
 	}
@@ -314,7 +316,7 @@ func TestCreateAction_KillAllInstancesAction_MissingJobID(t *testing.T) {
 
 // TestCreateAction_UpdateMetadataAction tests creating an UpdateMetadataAction
 func TestCreateAction_UpdateMetadataAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "update_metadata",
 		Config: json.RawMessage(`{"job_id":"job-123","metadata":{"key":"value"}}`),
 	}
@@ -336,7 +338,7 @@ func TestCreateAction_UpdateMetadataAction(t *testing.T) {
 
 // TestCreateAction_UpdateMetadataAction_MissingJobID tests error for missing job_id
 func TestCreateAction_UpdateMetadataAction_MissingJobID(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "update_metadata",
 		Config: json.RawMessage(`{"metadata":{}}`),
 	}
@@ -353,7 +355,7 @@ func TestCreateAction_UpdateMetadataAction_MissingJobID(t *testing.T) {
 
 // TestCreateAction_UpdateMetadataAction_MissingMetadata tests error for missing metadata
 func TestCreateAction_UpdateMetadataAction_MissingMetadata(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "update_metadata",
 		Config: json.RawMessage(`{"job_id":"job-123"}`),
 	}
@@ -370,7 +372,7 @@ func TestCreateAction_UpdateMetadataAction_MissingMetadata(t *testing.T) {
 
 // TestCreateAction_UpdateMetadataAction_EmptyMetadata tests error for empty metadata
 func TestCreateAction_UpdateMetadataAction_EmptyMetadata(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "update_metadata",
 		Config: json.RawMessage(`{"job_id":"job-123","metadata":{}}`),
 	}
@@ -387,7 +389,7 @@ func TestCreateAction_UpdateMetadataAction_EmptyMetadata(t *testing.T) {
 
 // TestCreateAction_MetricAction tests creating a MetricAction
 func TestCreateAction_MetricAction(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "metric",
 		Config: json.RawMessage(`{"name":"metric.name","value":123.45,"tags":{"env":"prod"}}`),
 	}
@@ -409,7 +411,7 @@ func TestCreateAction_MetricAction(t *testing.T) {
 
 // TestCreateAction_MetricAction_StringValue tests creating a MetricAction with string value
 func TestCreateAction_MetricAction_StringValue(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "metric",
 		Config: json.RawMessage(`{"name":"metric.name","value":"100"}`),
 	}
@@ -431,7 +433,7 @@ func TestCreateAction_MetricAction_StringValue(t *testing.T) {
 
 // TestCreateAction_MetricAction_MissingName tests error for missing name
 func TestCreateAction_MetricAction_MissingName(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "metric",
 		Config: json.RawMessage(`{"value":100}`),
 	}
@@ -448,7 +450,7 @@ func TestCreateAction_MetricAction_MissingName(t *testing.T) {
 
 // TestCreateAction_MetricAction_MissingValue tests error for missing value
 func TestCreateAction_MetricAction_MissingValue(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "metric",
 		Config: json.RawMessage(`{"name":"metric.name"}`),
 	}
@@ -465,7 +467,7 @@ func TestCreateAction_MetricAction_MissingValue(t *testing.T) {
 
 // TestCreateAction_MetricAction_InvalidValueType tests error for invalid value type
 func TestCreateAction_MetricAction_InvalidValueType(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "metric",
 		Config: json.RawMessage(`{"name":"metric.name","value":true}`),
 	}
@@ -478,7 +480,7 @@ func TestCreateAction_MetricAction_InvalidValueType(t *testing.T) {
 
 // TestCreateAction_UnknownType tests error for unknown action type
 func TestCreateAction_UnknownType(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "unknown",
 		Config: json.RawMessage(`{}`),
 	}
@@ -496,7 +498,7 @@ func TestCreateAction_UnknownType(t *testing.T) {
 
 // TestCreateAction_InvalidJSON tests error for invalid JSON
 func TestCreateAction_InvalidJSON(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "delay",
 		Config: json.RawMessage(`{invalid json`),
 	}
@@ -521,7 +523,7 @@ func TestParseDelayAction_ValidDurations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.duration, func(t *testing.T) {
-			config := ActionConfig{
+			config := model.ActionParseConfig{
 				Type:   "delay",
 				Config: json.RawMessage(`{"duration":"` + tt.duration + `"}`),
 			}
@@ -544,7 +546,7 @@ func TestParseDelayAction_InvalidDuration(t *testing.T) {
 
 	for _, duration := range invalidDurations {
 		t.Run(duration, func(t *testing.T) {
-			config := ActionConfig{
+			config := model.ActionParseConfig{
 				Type:   "delay",
 				Config: json.RawMessage(`{"duration":"` + duration + `"}`),
 			}
@@ -559,7 +561,7 @@ func TestParseDelayAction_InvalidDuration(t *testing.T) {
 
 // TestParseWebhookAction_ComplexPayload tests parsing webhook with complex payload
 func TestParseWebhookAction_ComplexPayload(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "webhook",
 		Config: json.RawMessage(`{"url":"http://example.com","payload":{"nested":{"key":"value"},"array":[1,2,3]}}`),
 	}
@@ -586,7 +588,7 @@ func TestParseWebhookAction_ComplexPayload(t *testing.T) {
 
 // TestParseMetricAction_ZeroValue tests that zero value is valid
 func TestParseMetricAction_ZeroValue(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "metric",
 		Config: json.RawMessage(`{"name":"metric.name","value":0}`),
 	}
@@ -603,7 +605,7 @@ func TestParseMetricAction_ZeroValue(t *testing.T) {
 
 // TestParseMetricAction_NegativeValue tests that negative value is valid
 func TestParseMetricAction_NegativeValue(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "metric",
 		Config: json.RawMessage(`{"name":"metric.name","value":-10.5}`),
 	}
@@ -620,7 +622,7 @@ func TestParseMetricAction_NegativeValue(t *testing.T) {
 
 // TestParseMetricAction_TemplateInValue tests that template strings are stored as-is
 func TestParseMetricAction_TemplateInValue(t *testing.T) {
-	config := ActionConfig{
+	config := model.ActionParseConfig{
 		Type:   "metric",
 		Config: json.RawMessage(`{"name":"metric.name","value":"{{.Variable}}"}`),
 	}

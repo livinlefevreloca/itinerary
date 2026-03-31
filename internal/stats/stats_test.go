@@ -9,6 +9,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/livinlefevreloca/itinerary/internal/db"
+	"github.com/livinlefevreloca/itinerary/internal/model"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -608,7 +609,7 @@ func TestDatabaseWrite_OrchestratorStats(t *testing.T) {
 	defer database.Close()
 
 	// Create job_run entries (foreign key requirement)
-	job := &db.Job{
+	job := &model.Job{
 		ID:       "test-job",
 		Name:     "Test Job",
 		Schedule: "* * * * *",
@@ -620,7 +621,7 @@ func TestDatabaseWrite_OrchestratorStats(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		runID := fmt.Sprintf("run-%d", i)
 		scheduledAt := time.Now().Add(time.Duration(i) * time.Minute)
-		jobRun := &db.JobRun{
+		jobRun := &model.JobRun{
 			JobID:       "test-job",
 			RunID:       runID,
 			ScheduledAt: scheduledAt,

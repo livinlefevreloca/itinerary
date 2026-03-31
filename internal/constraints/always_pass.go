@@ -1,14 +1,16 @@
 package constraints
 
+import "github.com/livinlefevreloca/itinerary/internal/model"
+
 // AlwaysPassConstraint always returns Met=true, useful for testing
 type AlwaysPassConstraint struct {
 	name    string
 	recheck bool
-	phases  []EvaluationPhase
+	phases  []model.EvaluationPhase
 }
 
 // NewAlwaysPassConstraint creates a new AlwaysPassConstraint
-func NewAlwaysPassConstraint(name string, recheck bool, phases []EvaluationPhase) *AlwaysPassConstraint {
+func NewAlwaysPassConstraint(name string, recheck bool, phases []model.EvaluationPhase) *AlwaysPassConstraint {
 	return &AlwaysPassConstraint{
 		name:    name,
 		recheck: recheck,
@@ -16,15 +18,15 @@ func NewAlwaysPassConstraint(name string, recheck bool, phases []EvaluationPhase
 	}
 }
 
-func (a *AlwaysPassConstraint) Check(ctx *ExecutionContext) (ConstraintResult, error) {
-	return ConstraintResult{Met: true, Message: "always pass"}, nil
+func (a *AlwaysPassConstraint) Check(ctx *model.ExecutionContext) (model.ConstraintResult, error) {
+	return model.ConstraintResult{Met: true, Message: "always pass"}, nil
 }
 
 func (a *AlwaysPassConstraint) Name() string {
 	return a.name
 }
 
-func (a *AlwaysPassConstraint) EvaluationTiming() []EvaluationPhase {
+func (a *AlwaysPassConstraint) EvaluationTiming() []model.EvaluationPhase {
 	return a.phases
 }
 

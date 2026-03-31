@@ -2,99 +2,22 @@ package actions
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strconv"
 	"text/template"
 	"time"
 
-	"github.com/livinlefevreloca/itinerary/internal/db"
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // Action interface that all action types must implement
 type Action interface {
 	// Execute performs the action
-	Execute(ctx *ExecutionContext) error
+	Execute(ctx *model.ExecutionContext) error
 
 	// Name returns the human-readable name of this action
 	Name() string
-}
-
-// ExecutionContext provides dependencies to actions
-type ExecutionContext struct {
-	// Job information
-	Job   *db.Job
-	RunID string
-
-	// Command execution details
-	Command string
-	Args    []string
-	Kwargs  map[string]string
-
-	// Communication
-	Inbox          MessageSender
-	WebhookHandler WebhookSender
-
-	// Job control
-	JobController   JobController
-	MetadataUpdater MetadataUpdater
-	MetricRecorder  MetricRecorder
-
-	// Logging
-	Logger *slog.Logger
-
-	// Cancellation
-	Context context.Context
-}
-
-// MessageSender interface for sending messages
-type MessageSender interface {
-	Send(msg interface{}) error
-}
-
-// WebhookSender interface for sending webhooks
-type WebhookSender interface {
-	SendWebhook(url string, payload interface{}) error
-}
-
-// JobController interface for job control operations
-type JobController interface {
-	RetryJob(jobID string) error
-	TriggerJob(jobID string, args map[string]interface{}) error
-	KillAllInstances(jobID string) error
-	KillLatestInstance(jobID string) error
-	SkipNextInstance(jobID string) error
-}
-
-// MetadataUpdater interface for updating job metadata
-type MetadataUpdater interface {
-	UpdateMetadata(jobID string, metadata map[string]interface{}) error
-}
-
-// MetricRecorder interface for recording metrics
-type MetricRecorder interface {
-	RecordMetric(name string, value float64, tags map[string]string) error
-}
-
-// TemplateData holds data available for template rendering
-type TemplateData struct {
-	JobID            string
-	JobName          string
-	RunID            string
-	Command          string
-	Args             []string
-	Kwargs           map[string]string
-	Timestamp        time.Time
-	ConstraintName   string
-	ConstraintStatus string
-}
-
-// ActionConfig holds the JSON configuration for creating actions
-type ActionConfig struct {
-	Type   string          `json:"type"`
-	Config json.RawMessage `json:"config"`
 }
 
 // Action implementations
@@ -105,7 +28,7 @@ type DelayAction struct {
 	duration time.Duration
 }
 
-func (d *DelayAction) Execute(ctx *ExecutionContext) error {
+func (d *DelayAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info("delaying execution",
 		"duration", d.duration,
 		"runID", ctx.RunID)
@@ -132,7 +55,7 @@ type WebhookAction struct {
 	payload interface{}
 }
 
-func (w *WebhookAction) Execute(ctx *ExecutionContext) error {
+func (w *WebhookAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info("sending webhook",
 		"url", w.url,
 		"runID", ctx.RunID)
@@ -165,7 +88,7 @@ type LogAction struct {
 	message string
 }
 
-func (l *LogAction) Execute(ctx *ExecutionContext) error {
+func (l *LogAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info(l.message,
 		"constraint_action", "log",
 		"runID", ctx.RunID)
@@ -182,7 +105,7 @@ type FailAction struct {
 	reason string
 }
 
-func (f *FailAction) Execute(ctx *ExecutionContext) error {
+func (f *FailAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Error("failing job due to constraint action",
 		"reason", f.reason,
 		"runID", ctx.RunID)
@@ -199,7 +122,7 @@ type NoOpAction struct {
 	name string
 }
 
-func (n *NoOpAction) Execute(ctx *ExecutionContext) error {
+func (n *NoOpAction) Execute(ctx *model.ExecutionContext) error {
 	return nil
 }
 
@@ -212,7 +135,7 @@ type RetryAction struct {
 	name string
 }
 
-func (r *RetryAction) Execute(ctx *ExecutionContext) error {
+func (r *RetryAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info("retrying job",
 		"jobID", ctx.Job.ID,
 		"runID", ctx.RunID)
@@ -231,7 +154,7 @@ type TriggerJobAction struct {
 	args  map[string]interface{}
 }
 
-func (t *TriggerJobAction) Execute(ctx *ExecutionContext) error {
+func (t *TriggerJobAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info("triggering job",
 		"targetJobID", t.jobID,
 		"sourceRunID", ctx.RunID)
@@ -253,7 +176,7 @@ type SlackAction struct {
 	iconEmoji  string
 }
 
-func (s *SlackAction) Execute(ctx *ExecutionContext) error {
+func (s *SlackAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info("sending slack notification",
 		"channel", s.channel,
 		"runID", ctx.RunID)
@@ -306,7 +229,7 @@ type PagerDutyAction struct {
 	customDetails map[string]interface{}
 }
 
-func (p *PagerDutyAction) Execute(ctx *ExecutionContext) error {
+func (p *PagerDutyAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info("creating pagerduty incident",
 		"severity", p.severity,
 		"runID", ctx.RunID)
@@ -355,7 +278,7 @@ type KillAllInstancesAction struct {
 	jobID string
 }
 
-func (k *KillAllInstancesAction) Execute(ctx *ExecutionContext) error {
+func (k *KillAllInstancesAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info("killing all instances",
 		"jobID", k.jobID,
 		"runID", ctx.RunID)
@@ -373,7 +296,7 @@ type KillLatestInstanceAction struct {
 	jobID string
 }
 
-func (k *KillLatestInstanceAction) Execute(ctx *ExecutionContext) error {
+func (k *KillLatestInstanceAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info("killing latest instance",
 		"jobID", k.jobID,
 		"runID", ctx.RunID)
@@ -391,7 +314,7 @@ type SkipNextInstanceAction struct {
 	jobID string
 }
 
-func (s *SkipNextInstanceAction) Execute(ctx *ExecutionContext) error {
+func (s *SkipNextInstanceAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info("skipping next instance",
 		"jobID", s.jobID,
 		"runID", ctx.RunID)
@@ -410,7 +333,7 @@ type UpdateMetadataAction struct {
 	metadata map[string]interface{}
 }
 
-func (u *UpdateMetadataAction) Execute(ctx *ExecutionContext) error {
+func (u *UpdateMetadataAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info("updating job metadata",
 		"jobID", u.jobID,
 		"runID", ctx.RunID)
@@ -451,7 +374,7 @@ type MetricAction struct {
 	tags       map[string]string
 }
 
-func (m *MetricAction) Execute(ctx *ExecutionContext) error {
+func (m *MetricAction) Execute(ctx *model.ExecutionContext) error {
 	ctx.Logger.Info("recording metric",
 		"metric", m.metricName,
 		"runID", ctx.RunID)
@@ -504,7 +427,7 @@ func (m *MetricAction) Name() string {
 
 // Template rendering functions
 
-func renderTemplate(tmpl string, data *TemplateData) (string, error) {
+func renderTemplate(tmpl string, data *model.TemplateData) (string, error) {
 	t, err := template.New("action").Parse(tmpl)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
@@ -518,7 +441,7 @@ func renderTemplate(tmpl string, data *TemplateData) (string, error) {
 	return buf.String(), nil
 }
 
-func renderPayload(payload interface{}, data *TemplateData) (interface{}, error) {
+func renderPayload(payload interface{}, data *model.TemplateData) (interface{}, error) {
 	// Handle nil payload
 	if payload == nil {
 		return nil, nil
@@ -527,7 +450,7 @@ func renderPayload(payload interface{}, data *TemplateData) (interface{}, error)
 	return renderPayloadValue(payload, data)
 }
 
-func renderPayloadValue(value interface{}, data *TemplateData) (interface{}, error) {
+func renderPayloadValue(value interface{}, data *model.TemplateData) (interface{}, error) {
 	switch v := value.(type) {
 	case string:
 		// Render template in string value
@@ -560,8 +483,8 @@ func renderPayloadValue(value interface{}, data *TemplateData) (interface{}, err
 	}
 }
 
-func buildTemplateData(ctx *ExecutionContext) *TemplateData {
-	return &TemplateData{
+func buildTemplateData(ctx *model.ExecutionContext) *model.TemplateData {
+	return &model.TemplateData{
 		JobID:     ctx.Job.ID,
 		JobName:   ctx.Job.Name,
 		RunID:     ctx.RunID,
@@ -573,7 +496,7 @@ func buildTemplateData(ctx *ExecutionContext) *TemplateData {
 }
 
 // CreateAction factory function
-func CreateAction(config ActionConfig) (Action, error) {
+func CreateAction(config model.ActionParseConfig) (Action, error) {
 	switch config.Type {
 	case "delay":
 		return parseDelayAction(config)
@@ -610,7 +533,7 @@ func CreateAction(config ActionConfig) (Action, error) {
 
 // Parse functions
 
-func parseDelayAction(config ActionConfig) (*DelayAction, error) {
+func parseDelayAction(config model.ActionParseConfig) (*DelayAction, error) {
 	var cfg struct {
 		Duration string `json:"duration"`
 	}
@@ -629,7 +552,7 @@ func parseDelayAction(config ActionConfig) (*DelayAction, error) {
 	}, nil
 }
 
-func parseWebhookAction(config ActionConfig) (*WebhookAction, error) {
+func parseWebhookAction(config model.ActionParseConfig) (*WebhookAction, error) {
 	var cfg struct {
 		URL     string      `json:"url"`
 		Payload interface{} `json:"payload"`
@@ -645,7 +568,7 @@ func parseWebhookAction(config ActionConfig) (*WebhookAction, error) {
 	}, nil
 }
 
-func parseLogAction(config ActionConfig) (*LogAction, error) {
+func parseLogAction(config model.ActionParseConfig) (*LogAction, error) {
 	var cfg struct {
 		Message string `json:"message"`
 	}
@@ -659,7 +582,7 @@ func parseLogAction(config ActionConfig) (*LogAction, error) {
 	}, nil
 }
 
-func parseFailAction(config ActionConfig) (*FailAction, error) {
+func parseFailAction(config model.ActionParseConfig) (*FailAction, error) {
 	var cfg struct {
 		Reason string `json:"reason"`
 	}
@@ -673,7 +596,7 @@ func parseFailAction(config ActionConfig) (*FailAction, error) {
 	}, nil
 }
 
-func parseTriggerJobAction(config ActionConfig) (*TriggerJobAction, error) {
+func parseTriggerJobAction(config model.ActionParseConfig) (*TriggerJobAction, error) {
 	var cfg struct {
 		JobID string                 `json:"job_id"`
 		Args  map[string]interface{} `json:"args"`
@@ -693,7 +616,7 @@ func parseTriggerJobAction(config ActionConfig) (*TriggerJobAction, error) {
 	}, nil
 }
 
-func parseSlackAction(config ActionConfig) (*SlackAction, error) {
+func parseSlackAction(config model.ActionParseConfig) (*SlackAction, error) {
 	var cfg struct {
 		WebhookURL string `json:"webhook_url"`
 		Channel    string `json:"channel"`
@@ -719,7 +642,7 @@ func parseSlackAction(config ActionConfig) (*SlackAction, error) {
 	}, nil
 }
 
-func parsePagerDutyAction(config ActionConfig) (*PagerDutyAction, error) {
+func parsePagerDutyAction(config model.ActionParseConfig) (*PagerDutyAction, error) {
 	var cfg struct {
 		RoutingKey    string                 `json:"routing_key"`
 		Severity      string                 `json:"severity"`
@@ -745,7 +668,7 @@ func parsePagerDutyAction(config ActionConfig) (*PagerDutyAction, error) {
 	}, nil
 }
 
-func parseKillAllInstancesAction(config ActionConfig) (*KillAllInstancesAction, error) {
+func parseKillAllInstancesAction(config model.ActionParseConfig) (*KillAllInstancesAction, error) {
 	var cfg struct {
 		JobID string `json:"job_id"`
 	}
@@ -763,7 +686,7 @@ func parseKillAllInstancesAction(config ActionConfig) (*KillAllInstancesAction, 
 	}, nil
 }
 
-func parseKillLatestInstanceAction(config ActionConfig) (*KillLatestInstanceAction, error) {
+func parseKillLatestInstanceAction(config model.ActionParseConfig) (*KillLatestInstanceAction, error) {
 	var cfg struct {
 		JobID string `json:"job_id"`
 	}
@@ -781,7 +704,7 @@ func parseKillLatestInstanceAction(config ActionConfig) (*KillLatestInstanceActi
 	}, nil
 }
 
-func parseSkipNextInstanceAction(config ActionConfig) (*SkipNextInstanceAction, error) {
+func parseSkipNextInstanceAction(config model.ActionParseConfig) (*SkipNextInstanceAction, error) {
 	var cfg struct {
 		JobID string `json:"job_id"`
 	}
@@ -799,7 +722,7 @@ func parseSkipNextInstanceAction(config ActionConfig) (*SkipNextInstanceAction, 
 	}, nil
 }
 
-func parseUpdateMetadataAction(config ActionConfig) (*UpdateMetadataAction, error) {
+func parseUpdateMetadataAction(config model.ActionParseConfig) (*UpdateMetadataAction, error) {
 	var cfg struct {
 		JobID    string                 `json:"job_id"`
 		Metadata map[string]interface{} `json:"metadata"`
@@ -823,7 +746,7 @@ func parseUpdateMetadataAction(config ActionConfig) (*UpdateMetadataAction, erro
 	}, nil
 }
 
-func parseMetricAction(config ActionConfig) (*MetricAction, error) {
+func parseMetricAction(config model.ActionParseConfig) (*MetricAction, error) {
 	var cfg struct {
 		Name  string            `json:"name"`
 		Value interface{}       `json:"value"`

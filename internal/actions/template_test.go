@@ -4,13 +4,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/livinlefevreloca/itinerary/internal/db"
+	"github.com/livinlefevreloca/itinerary/internal/model"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
 // TestRenderTemplate_SimpleVariable tests rendering a simple variable
 func TestRenderTemplate_SimpleVariable(t *testing.T) {
-	data := &TemplateData{
+	data := &model.TemplateData{
 		JobID: "job-123",
 	}
 
@@ -27,7 +27,7 @@ func TestRenderTemplate_SimpleVariable(t *testing.T) {
 
 // TestRenderTemplate_MultipleVariables tests rendering multiple variables
 func TestRenderTemplate_MultipleVariables(t *testing.T) {
-	data := &TemplateData{
+	data := &model.TemplateData{
 		JobID: "job-123",
 		RunID: "run-456",
 	}
@@ -45,7 +45,7 @@ func TestRenderTemplate_MultipleVariables(t *testing.T) {
 
 // TestRenderTemplate_Command tests rendering command
 func TestRenderTemplate_Command(t *testing.T) {
-	data := &TemplateData{
+	data := &model.TemplateData{
 		Command: "deploy.sh",
 	}
 
@@ -62,7 +62,7 @@ func TestRenderTemplate_Command(t *testing.T) {
 
 // TestRenderTemplate_KwargsIndex tests accessing kwargs
 func TestRenderTemplate_KwargsIndex(t *testing.T) {
-	data := &TemplateData{
+	data := &model.TemplateData{
 		Kwargs: map[string]string{"env": "prod"},
 	}
 
@@ -79,7 +79,7 @@ func TestRenderTemplate_KwargsIndex(t *testing.T) {
 
 // TestRenderTemplate_ArgsIndex tests accessing args
 func TestRenderTemplate_ArgsIndex(t *testing.T) {
-	data := &TemplateData{
+	data := &model.TemplateData{
 		Args: []string{"arg1", "arg2"},
 	}
 
@@ -96,7 +96,7 @@ func TestRenderTemplate_ArgsIndex(t *testing.T) {
 
 // TestRenderTemplate_InvalidSyntax tests handling of invalid template syntax
 func TestRenderTemplate_InvalidSyntax(t *testing.T) {
-	data := &TemplateData{}
+	data := &model.TemplateData{}
 
 	_, err := renderTemplate("{{.JobID", data)
 	if err == nil {
@@ -106,7 +106,7 @@ func TestRenderTemplate_InvalidSyntax(t *testing.T) {
 
 // TestRenderTemplate_NoTemplateVariables tests plain text with no variables
 func TestRenderTemplate_NoTemplateVariables(t *testing.T) {
-	data := &TemplateData{}
+	data := &model.TemplateData{}
 
 	result, err := renderTemplate("Plain text with no variables", data)
 	if err != nil {
@@ -121,7 +121,7 @@ func TestRenderTemplate_NoTemplateVariables(t *testing.T) {
 
 // TestRenderTemplate_URLEncoding tests rendering in URLs
 func TestRenderTemplate_URLEncoding(t *testing.T) {
-	data := &TemplateData{
+	data := &model.TemplateData{
 		JobID: "job-123",
 		RunID: "run-456",
 	}
@@ -139,7 +139,7 @@ func TestRenderTemplate_URLEncoding(t *testing.T) {
 
 // TestRenderPayload_SimpleObject tests rendering a simple object
 func TestRenderPayload_SimpleObject(t *testing.T) {
-	data := &TemplateData{
+	data := &model.TemplateData{
 		JobID: "job-123",
 	}
 
@@ -164,7 +164,7 @@ func TestRenderPayload_SimpleObject(t *testing.T) {
 
 // TestRenderPayload_NestedObject tests rendering nested objects
 func TestRenderPayload_NestedObject(t *testing.T) {
-	data := &TemplateData{
+	data := &model.TemplateData{
 		JobID:   "job-123",
 		JobName: "test-job",
 	}
@@ -202,7 +202,7 @@ func TestRenderPayload_NestedObject(t *testing.T) {
 
 // TestRenderPayload_EmptyObject tests rendering an empty object
 func TestRenderPayload_EmptyObject(t *testing.T) {
-	data := &TemplateData{}
+	data := &model.TemplateData{}
 	payload := map[string]interface{}{}
 
 	result, err := renderPayload(payload, data)
@@ -223,7 +223,7 @@ func TestRenderPayload_EmptyObject(t *testing.T) {
 // TestBuildTemplateData_AllFields tests building template data with all fields
 func TestBuildTemplateData_AllFields(t *testing.T) {
 	ctx := NewExecutionContextBuilder().
-		WithJob(&db.Job{ID: "job-123", Name: "test-job"}).
+		WithJob(&model.Job{ID: "job-123", Name: "test-job"}).
 		WithRunID("run-456").
 		WithCommand("deploy.sh").
 		WithArgs([]string{"arg1", "arg2"}).
@@ -314,7 +314,7 @@ func TestWebhookAction_TemplateInURL(t *testing.T) {
 	}
 
 	ctx := NewExecutionContextBuilder().
-		WithJob(&db.Job{ID: "job-123"}).
+		WithJob(&model.Job{ID: "job-123"}).
 		WithWebhookHandler(mockHandler).
 		Build()
 
@@ -347,7 +347,7 @@ func TestWebhookAction_TemplateInPayload(t *testing.T) {
 	}
 
 	ctx := NewExecutionContextBuilder().
-		WithJob(&db.Job{ID: "job-123"}).
+		WithJob(&model.Job{ID: "job-123"}).
 		WithRunID("run-456").
 		WithWebhookHandler(mockHandler).
 		Build()
@@ -386,7 +386,7 @@ func TestSlackAction_TemplateInText(t *testing.T) {
 	}
 
 	ctx := NewExecutionContextBuilder().
-		WithJob(&db.Job{Name: "deploy-prod"}).
+		WithJob(&model.Job{Name: "deploy-prod"}).
 		WithWebhookHandler(mockHandler).
 		Build()
 
@@ -458,7 +458,7 @@ func TestMetricAction_TemplateInName(t *testing.T) {
 	}
 
 	ctx := NewExecutionContextBuilder().
-		WithJob(&db.Job{Name: "deploy"}).
+		WithJob(&model.Job{Name: "deploy"}).
 		WithMetricRecorder(mockRecorder).
 		Build()
 
@@ -522,7 +522,7 @@ func TestMetricAction_TemplateInTags(t *testing.T) {
 	}
 
 	ctx := NewExecutionContextBuilder().
-		WithJob(&db.Job{ID: "job-123"}).
+		WithJob(&model.Job{ID: "job-123"}).
 		WithRunID("run-456").
 		WithMetricRecorder(mockRecorder).
 		Build()

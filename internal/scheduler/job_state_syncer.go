@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +24,9 @@ type JobStateSyncer struct {
 	jobRunUpdateBuffer []JobRunUpdate
 	jobRunChannel      chan JobRunUpdate
 	lastJobRunFlush    time.Time
+
+	// Stats
+	droppedUpdates int64
 
 	// Control
 	shutdown chan struct{}
@@ -72,9 +76,11 @@ func (s *JobStateSyncer) FlushJobRunUpdates() error {
 		case s.jobRunChannel <- update:
 			// Successfully sent
 		default:
+			atomic.AddInt64(&s.droppedUpdates, 1)
 			s.logger.Warn("job run channel full, dropping update",
 				"buffered_updates", len(s.jobRunUpdateBuffer),
-				"update_id", update.UpdateID)
+				"update_id", update.UpdateID,
+				"dropped_total", atomic.LoadInt64(&s.droppedUpdates))
 			return fmt.Errorf("job run channel full, %d updates buffered", len(s.jobRunUpdateBuffer))
 		}
 	}
@@ -89,6 +95,7 @@ func (s *JobStateSyncer) FlushJobRunUpdates() error {
 func (s *JobStateSyncer) GetStats() JobStateSyncerStats {
 	return JobStateSyncerStats{
 		BufferedJobRunUpdates: len(s.jobRunUpdateBuffer),
+		DroppedUpdates:        atomic.LoadInt64(&s.droppedUpdates),
 	}
 }
 

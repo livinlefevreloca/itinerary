@@ -4,7 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/livinlefevreloca/itinerary/internal/db"
+	"github.com/livinlefevreloca/itinerary/internal/model"
+	"github.com/livinlefevreloca/itinerary/internal/testutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,10 +15,10 @@ import (
 
 // TestStatePaths_HappyPath verifies the normal success path
 func TestStatePaths_HappyPath(t *testing.T) {
-	recorder := NewStateRecorder()
+	recorder := testutil.NewStateRecorder()
 	orch := NewOrchestrator(
 		"test-run-id",
-		&db.Job{ID: "test-job", Name: "test"},
+		&model.Job{ID: "test-job", Name: "test"},
 		// Use past scheduled time so it starts immediately
 		// We'll test actual waiting in lifecycle tests
 		now().Add(-1*time.Second),
@@ -60,10 +61,10 @@ func TestStatePaths_HappyPath(t *testing.T) {
 
 // TestStatePaths_WithConstraints verifies path with constraint checking
 func TestStatePaths_WithConstraints(t *testing.T) {
-	recorder := NewStateRecorder()
+	recorder := testutil.NewStateRecorder()
 	orch := NewOrchestrator(
 		"test-run-id",
-		&db.Job{ID: "test-job", Name: "test"},
+		&model.Job{ID: "test-job", Name: "test"},
 		now().Add(-1*time.Second),
 		createMockConstraintChecker(true, nil),
 		createFakeK8sClient(),
@@ -106,20 +107,21 @@ func TestStatePaths_WithConstraints(t *testing.T) {
 	assert.Equal(t, expected, recorder.Path())
 }
 
-// TestStatePaths_WithActions verifies path with action execution
+// TestStatePaths_WithActions verifies path where constraint checking triggers actions.
+// Actions are handled within condition_running — there is no separate action_running state.
 func TestStatePaths_WithActions(t *testing.T) {
-	recorder := NewStateRecorder()
+	recorder := testutil.NewStateRecorder()
 	orch := NewOrchestrator(
 		"test-run-id",
-		&db.Job{ID: "test-job", Name: "test"},
+		&model.Job{ID: "test-job", Name: "test"},
 		now().Add(-1*time.Second),
-		createNoOpConstraintChecker(),
+		createMockConstraintChecker(true, nil),
 		createFakeK8sClient(),
 		createTestLogger().Logger(),
 	)
 	orch.recorder = recorder
 
-	// Step through action execution path (no more pending intermediates)
+	// Actions run inside condition_running; the state path goes directly to container_creating
 	preRun := &PreRunState{}
 	orch.transitionTo(preRun)
 
@@ -129,10 +131,7 @@ func TestStatePaths_WithActions(t *testing.T) {
 	conditionRunning := pending.ToConditionRunning()
 	orch.transitionTo(conditionRunning)
 
-	actionRunning := conditionRunning.ToActionRunning()
-	orch.transitionTo(actionRunning)
-
-	containerCreating := actionRunning.ToContainerCreating()
+	containerCreating := conditionRunning.ToContainerCreating()
 	orch.transitionTo(containerCreating)
 
 	running := containerCreating.ToRunning()
@@ -149,7 +148,6 @@ func TestStatePaths_WithActions(t *testing.T) {
 		"prerun",
 		"pending",
 		"condition_running",
-		"action_running",
 		"container_creating",
 		"running",
 		"terminating",
@@ -160,10 +158,10 @@ func TestStatePaths_WithActions(t *testing.T) {
 
 // TestStatePaths_WithRetry verifies path with retry (goes back to pending via terminating)
 func TestStatePaths_WithRetry(t *testing.T) {
-	recorder := NewStateRecorder()
+	recorder := testutil.NewStateRecorder()
 	orch := NewOrchestrator(
 		"test-run-id",
-		&db.Job{ID: "test-job", Name: "test"},
+		&model.Job{ID: "test-job", Name: "test"},
 		now().Add(-1*time.Second),
 		createNoOpConstraintChecker(),
 		createFakeK8sClient(),
@@ -283,10 +281,10 @@ func TestStatePaths_Cancellation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			recorder := NewStateRecorder()
+			recorder := testutil.NewStateRecorder()
 			orch := NewOrchestrator(
 				"test-run-id",
-				&db.Job{ID: "test-job", Name: "test"},
+				&model.Job{ID: "test-job", Name: "test"},
 				now().Add(-1*time.Second),
 				createNoOpConstraintChecker(),
 				createFakeK8sClient(),
@@ -306,10 +304,10 @@ func TestStatePaths_Cancellation(t *testing.T) {
 
 // TestStatePaths_Failure verifies failure paths
 func TestStatePaths_Failure(t *testing.T) {
-	recorder := NewStateRecorder()
+	recorder := testutil.NewStateRecorder()
 	orch := NewOrchestrator(
 		"test-run-id",
-		&db.Job{ID: "test-job", Name: "test"},
+		&model.Job{ID: "test-job", Name: "test"},
 		now().Add(-1*time.Second),
 		createNoOpConstraintChecker(),
 		createFakeK8sClient(),

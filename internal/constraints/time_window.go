@@ -3,6 +3,8 @@ package constraints
 import (
 	"fmt"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // TimeWindowConstraint checks if current time is within a specified window
@@ -25,7 +27,7 @@ func NewTimeWindowConstraint(name string, startTime, endTime time.Time, timezone
 	}
 }
 
-func (t *TimeWindowConstraint) Check(ctx *ExecutionContext) (ConstraintResult, error) {
+func (t *TimeWindowConstraint) Check(ctx *model.ExecutionContext) (model.ConstraintResult, error) {
 	now := time.Now().In(t.timezone)
 
 	// Convert now to today's window times
@@ -36,7 +38,7 @@ func (t *TimeWindowConstraint) Check(ctx *ExecutionContext) (ConstraintResult, e
 
 	met := now.After(start) && now.Before(end)
 
-	return ConstraintResult{
+	return model.ConstraintResult{
 		Met: met,
 		Message: fmt.Sprintf("time window check [%s-%s]: %v",
 			start.Format("15:04"), end.Format("15:04"), met),
@@ -47,8 +49,8 @@ func (t *TimeWindowConstraint) Name() string {
 	return t.name
 }
 
-func (t *TimeWindowConstraint) EvaluationTiming() []EvaluationPhase {
-	return []EvaluationPhase{EvaluationPhasePreExecution}
+func (t *TimeWindowConstraint) EvaluationTiming() []model.EvaluationPhase {
+	return []model.EvaluationPhase{model.EvaluationPhasePreExecution}
 }
 
 func (t *TimeWindowConstraint) ShouldRecheckOnRetry() bool {

@@ -4,28 +4,28 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/livinlefevreloca/itinerary/internal/db"
+	"github.com/livinlefevreloca/itinerary/internal/model"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
 // ExecutionContextBuilder helps create ExecutionContext for testing
 type ExecutionContextBuilder struct {
-	job             *db.Job
+	job             *model.Job
 	runID           string
 	command         string
 	args            []string
 	kwargs          map[string]string
-	webhookHandler  WebhookSender
-	jobController   JobController
-	metadataUpdater MetadataUpdater
-	metricRecorder  MetricRecorder
+	webhookHandler  model.WebhookSender
+	jobController   model.JobController
+	metadataUpdater model.MetadataUpdater
+	metricRecorder  model.MetricRecorder
 	logger          *slog.Logger
 	ctx             context.Context
 }
 
 func NewExecutionContextBuilder() *ExecutionContextBuilder {
 	return &ExecutionContextBuilder{
-		job: &db.Job{
+		job: &model.Job{
 			ID:   "test-job-id",
 			Name: "test-job",
 		},
@@ -42,7 +42,7 @@ func NewExecutionContextBuilder() *ExecutionContextBuilder {
 	}
 }
 
-func (b *ExecutionContextBuilder) WithJob(job *db.Job) *ExecutionContextBuilder {
+func (b *ExecutionContextBuilder) WithJob(job *model.Job) *ExecutionContextBuilder {
 	b.job = job
 	return b
 }
@@ -67,22 +67,22 @@ func (b *ExecutionContextBuilder) WithKwargs(kwargs map[string]string) *Executio
 	return b
 }
 
-func (b *ExecutionContextBuilder) WithWebhookHandler(handler WebhookSender) *ExecutionContextBuilder {
+func (b *ExecutionContextBuilder) WithWebhookHandler(handler model.WebhookSender) *ExecutionContextBuilder {
 	b.webhookHandler = handler
 	return b
 }
 
-func (b *ExecutionContextBuilder) WithJobController(controller JobController) *ExecutionContextBuilder {
+func (b *ExecutionContextBuilder) WithJobController(controller model.JobController) *ExecutionContextBuilder {
 	b.jobController = controller
 	return b
 }
 
-func (b *ExecutionContextBuilder) WithMetadataUpdater(updater MetadataUpdater) *ExecutionContextBuilder {
+func (b *ExecutionContextBuilder) WithMetadataUpdater(updater model.MetadataUpdater) *ExecutionContextBuilder {
 	b.metadataUpdater = updater
 	return b
 }
 
-func (b *ExecutionContextBuilder) WithMetricRecorder(recorder MetricRecorder) *ExecutionContextBuilder {
+func (b *ExecutionContextBuilder) WithMetricRecorder(recorder model.MetricRecorder) *ExecutionContextBuilder {
 	b.metricRecorder = recorder
 	return b
 }
@@ -97,8 +97,8 @@ func (b *ExecutionContextBuilder) WithContext(ctx context.Context) *ExecutionCon
 	return b
 }
 
-func (b *ExecutionContextBuilder) Build() *ExecutionContext {
-	return &ExecutionContext{
+func (b *ExecutionContextBuilder) Build() *model.ExecutionContext {
+	return &model.ExecutionContext{
 		Job:             b.job,
 		RunID:           b.runID,
 		Command:         b.command,

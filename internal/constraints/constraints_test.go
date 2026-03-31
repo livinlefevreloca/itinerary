@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/livinlefevreloca/itinerary/internal/db"
+	"github.com/livinlefevreloca/itinerary/internal/model"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -168,8 +168,8 @@ func TestTimeWindowConstraint_EvaluationTiming(t *testing.T) {
 		t.Fatalf("Expected 1 phase, got %d", len(timing))
 	}
 
-	if timing[0] != EvaluationPhasePreExecution {
-		t.Errorf("Expected EvaluationPhasePreExecution, got %s", timing[0])
+	if timing[0] != model.EvaluationPhasePreExecution {
+		t.Errorf("Expected model.EvaluationPhasePreExecution, got %s", timing[0])
 	}
 }
 
@@ -182,10 +182,10 @@ func TestOtherJobRunningConstraint_JobIsRunning(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with job running
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobStateRequest); ok {
-			req.ResponseTo <- &JobStateResponse{
+		if req, ok := msg.(*model.JobStateRequest); ok {
+			req.ResponseTo <- &model.JobStateResponse{
 				JobID:     req.JobID,
 				IsRunning: true,
 				LastRun:   nil,
@@ -210,7 +210,7 @@ func TestOtherJobRunningConstraint_JobIsRunning(t *testing.T) {
 		t.Fatalf("Expected 1 message sent to scheduler, got %d", len(messages))
 	}
 
-	if req, ok := messages[0].(*JobStateRequest); ok {
+	if req, ok := messages[0].(*model.JobStateRequest); ok {
 		if req.JobID != "etl-job" {
 			t.Errorf("Expected JobID='etl-job', got '%s'", req.JobID)
 		}
@@ -224,10 +224,10 @@ func TestOtherJobRunningConstraint_JobIsNotRunning(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with job not running
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobStateRequest); ok {
-			req.ResponseTo <- &JobStateResponse{
+		if req, ok := msg.(*model.JobStateRequest); ok {
+			req.ResponseTo <- &model.JobStateResponse{
 				JobID:     req.JobID,
 				IsRunning: false,
 				LastRun:   nil,
@@ -252,10 +252,10 @@ func TestOtherJobRunningConstraint_ExpectRunning(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with job running
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobStateRequest); ok {
-			req.ResponseTo <- &JobStateResponse{
+		if req, ok := msg.(*model.JobStateRequest); ok {
+			req.ResponseTo <- &model.JobStateResponse{
 				JobID:     req.JobID,
 				IsRunning: true,
 				LastRun:   nil,
@@ -280,7 +280,7 @@ func TestOtherJobRunningConstraint_SchedulerError(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to return error
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetError(fmt.Errorf("scheduler unavailable"))
 
 	_, err := constraint.Check(ctx)
@@ -303,7 +303,7 @@ func TestOtherJobRunningConstraint_ContextCancelled(t *testing.T) {
 	ctx.Context = cancelCtx
 
 	// Setup mock to not respond (simulating slow response)
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
 		// Don't send response - let context cancellation happen
 	})
@@ -326,8 +326,8 @@ func TestOtherJobRunningConstraint_EvaluationTiming(t *testing.T) {
 		t.Fatalf("Expected 1 phase, got %d", len(timing))
 	}
 
-	if timing[0] != EvaluationPhasePreExecution {
-		t.Errorf("Expected EvaluationPhasePreExecution, got %s", timing[0])
+	if timing[0] != model.EvaluationPhasePreExecution {
+		t.Errorf("Expected model.EvaluationPhasePreExecution, got %s", timing[0])
 	}
 }
 
@@ -340,12 +340,12 @@ func TestOtherJobCompletedRecently_WithinWindow(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with run completed 15m ago
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobHistoryRequest); ok {
-			req.ResponseTo <- &JobHistoryResponse{
+		if req, ok := msg.(*model.JobHistoryRequest); ok {
+			req.ResponseTo <- &model.JobHistoryResponse{
 				JobID: req.JobID,
-				Runs: []JobRunSummary{
+				Runs: []model.JobRunSummary{
 					{
 						RunID:       "run-123",
 						StartedAt:   time.Now().Add(-20 * time.Minute),
@@ -372,12 +372,12 @@ func TestOtherJobCompletedRecently_OutsideWindow(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with run completed 45m ago
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobHistoryRequest); ok {
-			req.ResponseTo <- &JobHistoryResponse{
+		if req, ok := msg.(*model.JobHistoryRequest); ok {
+			req.ResponseTo <- &model.JobHistoryResponse{
 				JobID: req.JobID,
-				Runs: []JobRunSummary{
+				Runs: []model.JobRunSummary{
 					{
 						RunID:       "run-123",
 						StartedAt:   time.Now().Add(-50 * time.Minute),
@@ -404,12 +404,12 @@ func TestOtherJobCompletedRecently_MustSucceed_Success(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock with successful run
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobHistoryRequest); ok {
-			req.ResponseTo <- &JobHistoryResponse{
+		if req, ok := msg.(*model.JobHistoryRequest); ok {
+			req.ResponseTo <- &model.JobHistoryResponse{
 				JobID: req.JobID,
-				Runs: []JobRunSummary{
+				Runs: []model.JobRunSummary{
 					{
 						RunID:       "run-123",
 						StartedAt:   time.Now().Add(-20 * time.Minute),
@@ -436,12 +436,12 @@ func TestOtherJobCompletedRecently_MustSucceed_Failed(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock with failed run
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobHistoryRequest); ok {
-			req.ResponseTo <- &JobHistoryResponse{
+		if req, ok := msg.(*model.JobHistoryRequest); ok {
+			req.ResponseTo <- &model.JobHistoryResponse{
 				JobID: req.JobID,
-				Runs: []JobRunSummary{
+				Runs: []model.JobRunSummary{
 					{
 						RunID:       "run-123",
 						StartedAt:   time.Now().Add(-20 * time.Minute),
@@ -468,12 +468,12 @@ func TestOtherJobCompletedRecently_NoRuns(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock with no runs
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobHistoryRequest); ok {
-			req.ResponseTo <- &JobHistoryResponse{
+		if req, ok := msg.(*model.JobHistoryRequest); ok {
+			req.ResponseTo <- &model.JobHistoryResponse{
 				JobID: req.JobID,
-				Runs:  []JobRunSummary{},
+				Runs:  []model.JobRunSummary{},
 			}
 		}
 	})
@@ -500,8 +500,8 @@ func TestOtherJobCompletedRecently_EvaluationTiming(t *testing.T) {
 		t.Fatalf("Expected 1 phase, got %d", len(timing))
 	}
 
-	if timing[0] != EvaluationPhasePreExecution {
-		t.Errorf("Expected EvaluationPhasePreExecution, got %s", timing[0])
+	if timing[0] != model.EvaluationPhasePreExecution {
+		t.Errorf("Expected model.EvaluationPhasePreExecution, got %s", timing[0])
 	}
 }
 
@@ -515,10 +515,10 @@ func TestOtherJobScheduledSoon_ScheduledWithinWindow(t *testing.T) {
 
 	// Setup mock to respond with job scheduled in 5 minutes
 	nextRun := time.Now().Add(5 * time.Minute)
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobStateRequest); ok {
-			req.ResponseTo <- &JobStateResponse{
+		if req, ok := msg.(*model.JobStateRequest); ok {
+			req.ResponseTo <- &model.JobStateResponse{
 				JobID:     req.JobID,
 				IsRunning: false,
 				NextRun:   &nextRun,
@@ -542,10 +542,10 @@ func TestOtherJobScheduledSoon_ScheduledOutsideWindow(t *testing.T) {
 
 	// Setup mock to respond with job scheduled in 30 minutes
 	nextRun := time.Now().Add(30 * time.Minute)
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobStateRequest); ok {
-			req.ResponseTo <- &JobStateResponse{
+		if req, ok := msg.(*model.JobStateRequest); ok {
+			req.ResponseTo <- &model.JobStateResponse{
 				JobID:     req.JobID,
 				IsRunning: false,
 				NextRun:   &nextRun,
@@ -568,10 +568,10 @@ func TestOtherJobScheduledSoon_NoScheduledRun(t *testing.T) {
 	ctx := createTestExecutionContext()
 
 	// Setup mock to respond with no scheduled run
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobStateRequest); ok {
-			req.ResponseTo <- &JobStateResponse{
+		if req, ok := msg.(*model.JobStateRequest); ok {
+			req.ResponseTo <- &model.JobStateResponse{
 				JobID:     req.JobID,
 				IsRunning: false,
 				NextRun:   nil,
@@ -595,10 +595,10 @@ func TestOtherJobScheduledSoon_ScheduledInPast(t *testing.T) {
 
 	// Setup mock to respond with job scheduled in the past
 	nextRun := time.Now().Add(-5 * time.Minute)
-	mockInbox := ctx.SchedulerInbox.(*testutil.MockSchedulerInbox)
+	mockInbox := ctx.Inbox.(*testutil.MockSchedulerInbox)
 	mockInbox.SetResponseFunc(func(msg interface{}) {
-		if req, ok := msg.(*JobStateRequest); ok {
-			req.ResponseTo <- &JobStateResponse{
+		if req, ok := msg.(*model.JobStateRequest); ok {
+			req.ResponseTo <- &model.JobStateResponse{
 				JobID:     req.JobID,
 				IsRunning: false,
 				NextRun:   &nextRun,
@@ -624,8 +624,8 @@ func TestOtherJobScheduledSoon_EvaluationTiming(t *testing.T) {
 		t.Fatalf("Expected 1 phase, got %d", len(timing))
 	}
 
-	if timing[0] != EvaluationPhasePreExecution {
-		t.Errorf("Expected EvaluationPhasePreExecution, got %s", timing[0])
+	if timing[0] != model.EvaluationPhasePreExecution {
+		t.Errorf("Expected model.EvaluationPhasePreExecution, got %s", timing[0])
 	}
 }
 
@@ -915,8 +915,8 @@ func TestHTTPHealthCheck_EvaluationTiming(t *testing.T) {
 		t.Fatalf("Expected 1 phase, got %d", len(timing))
 	}
 
-	if timing[0] != EvaluationPhasePreExecution {
-		t.Errorf("Expected EvaluationPhasePreExecution, got %s", timing[0])
+	if timing[0] != model.EvaluationPhasePreExecution {
+		t.Errorf("Expected model.EvaluationPhasePreExecution, got %s", timing[0])
 	}
 }
 
@@ -1014,12 +1014,12 @@ func TestMaxRuntime_EvaluationPhase(t *testing.T) {
 		t.Fatalf("Expected 2 phases, got %d", len(timing))
 	}
 
-	if timing[0] != EvaluationPhaseDuringExecution {
-		t.Errorf("Expected EvaluationPhaseDuringExecution first, got %s", timing[0])
+	if timing[0] != model.EvaluationPhaseDuringExecution {
+		t.Errorf("Expected model.EvaluationPhaseDuringExecution first, got %s", timing[0])
 	}
 
-	if timing[1] != EvaluationPhasePostExecution {
-		t.Errorf("Expected EvaluationPhasePostExecution second, got %s", timing[1])
+	if timing[1] != model.EvaluationPhasePostExecution {
+		t.Errorf("Expected model.EvaluationPhasePostExecution second, got %s", timing[1])
 	}
 }
 
@@ -1028,7 +1028,7 @@ func TestMaxRuntime_EvaluationPhase(t *testing.T) {
 // ========================
 
 func TestAlwaysPassConstraint_AlwaysReturnsTrue(t *testing.T) {
-	constraint := NewAlwaysPassConstraint("test-pass", false, []EvaluationPhase{EvaluationPhasePreExecution})
+	constraint := NewAlwaysPassConstraint("test-pass", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution})
 	ctx := createTestExecutionContext()
 
 	// Call Check() multiple times
@@ -1049,19 +1049,19 @@ func TestAlwaysPassConstraint_AlwaysReturnsTrue(t *testing.T) {
 func TestAlwaysPassConstraint_EvaluationTiming(t *testing.T) {
 	tests := []struct {
 		name   string
-		phases []EvaluationPhase
+		phases []model.EvaluationPhase
 	}{
 		{
 			name:   "single phase",
-			phases: []EvaluationPhase{EvaluationPhasePreExecution},
+			phases: []model.EvaluationPhase{model.EvaluationPhasePreExecution},
 		},
 		{
 			name:   "multiple phases",
-			phases: []EvaluationPhase{EvaluationPhasePreExecution, EvaluationPhasePostExecution},
+			phases: []model.EvaluationPhase{model.EvaluationPhasePreExecution, model.EvaluationPhasePostExecution},
 		},
 		{
 			name:   "all phases",
-			phases: []EvaluationPhase{EvaluationPhasePreExecution, EvaluationPhaseDuringExecution, EvaluationPhasePostExecution},
+			phases: []model.EvaluationPhase{model.EvaluationPhasePreExecution, model.EvaluationPhaseDuringExecution, model.EvaluationPhasePostExecution},
 		},
 	}
 
@@ -1094,7 +1094,7 @@ func TestAlwaysPassConstraint_ShouldRecheckOnRetry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			constraint := NewAlwaysPassConstraint("test", tt.recheck, []EvaluationPhase{EvaluationPhasePreExecution})
+			constraint := NewAlwaysPassConstraint("test", tt.recheck, []model.EvaluationPhase{model.EvaluationPhasePreExecution})
 			if constraint.ShouldRecheckOnRetry() != tt.recheck {
 				t.Errorf("Expected ShouldRecheckOnRetry()=%v, got %v", tt.recheck, constraint.ShouldRecheckOnRetry())
 			}
@@ -1103,7 +1103,7 @@ func TestAlwaysPassConstraint_ShouldRecheckOnRetry(t *testing.T) {
 }
 
 func TestAlwaysPassConstraint_Name(t *testing.T) {
-	constraint := NewAlwaysPassConstraint("my-constraint", false, []EvaluationPhase{EvaluationPhasePreExecution})
+	constraint := NewAlwaysPassConstraint("my-constraint", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution})
 	if constraint.Name() != "my-constraint" {
 		t.Errorf("Expected name 'my-constraint', got: %s", constraint.Name())
 	}
@@ -1114,7 +1114,7 @@ func TestAlwaysPassConstraint_Name(t *testing.T) {
 // ========================
 
 func TestAlwaysFailConstraint_AlwaysReturnsFalse(t *testing.T) {
-	constraint := NewAlwaysFailConstraint("test-fail", false, []EvaluationPhase{EvaluationPhasePreExecution})
+	constraint := NewAlwaysFailConstraint("test-fail", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution})
 	ctx := createTestExecutionContext()
 
 	// Call Check() multiple times
@@ -1135,19 +1135,19 @@ func TestAlwaysFailConstraint_AlwaysReturnsFalse(t *testing.T) {
 func TestAlwaysFailConstraint_EvaluationTiming(t *testing.T) {
 	tests := []struct {
 		name   string
-		phases []EvaluationPhase
+		phases []model.EvaluationPhase
 	}{
 		{
 			name:   "single phase",
-			phases: []EvaluationPhase{EvaluationPhasePreExecution},
+			phases: []model.EvaluationPhase{model.EvaluationPhasePreExecution},
 		},
 		{
 			name:   "multiple phases",
-			phases: []EvaluationPhase{EvaluationPhasePreExecution, EvaluationPhasePostExecution},
+			phases: []model.EvaluationPhase{model.EvaluationPhasePreExecution, model.EvaluationPhasePostExecution},
 		},
 		{
 			name:   "all phases",
-			phases: []EvaluationPhase{EvaluationPhasePreExecution, EvaluationPhaseDuringExecution, EvaluationPhasePostExecution},
+			phases: []model.EvaluationPhase{model.EvaluationPhasePreExecution, model.EvaluationPhaseDuringExecution, model.EvaluationPhasePostExecution},
 		},
 	}
 
@@ -1180,7 +1180,7 @@ func TestAlwaysFailConstraint_ShouldRecheckOnRetry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			constraint := NewAlwaysFailConstraint("test", tt.recheck, []EvaluationPhase{EvaluationPhasePreExecution})
+			constraint := NewAlwaysFailConstraint("test", tt.recheck, []model.EvaluationPhase{model.EvaluationPhasePreExecution})
 			if constraint.ShouldRecheckOnRetry() != tt.recheck {
 				t.Errorf("Expected ShouldRecheckOnRetry()=%v, got %v", tt.recheck, constraint.ShouldRecheckOnRetry())
 			}
@@ -1189,7 +1189,7 @@ func TestAlwaysFailConstraint_ShouldRecheckOnRetry(t *testing.T) {
 }
 
 func TestAlwaysFailConstraint_Name(t *testing.T) {
-	constraint := NewAlwaysFailConstraint("my-failing-constraint", false, []EvaluationPhase{EvaluationPhasePreExecution})
+	constraint := NewAlwaysFailConstraint("my-failing-constraint", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution})
 	if constraint.Name() != "my-failing-constraint" {
 		t.Errorf("Expected name 'my-failing-constraint', got: %s", constraint.Name())
 	}
@@ -1242,7 +1242,7 @@ func TestNoOpAction_DoesNothing(t *testing.T) {
 // ========================
 
 func TestConstraintChecker_SingleConstraintMet(t *testing.T) {
-	constraint := NewAlwaysPassConstraint("test-pass", false, []EvaluationPhase{EvaluationPhasePreExecution})
+	constraint := NewAlwaysPassConstraint("test-pass", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution})
 	onMetAction := NewNoOpAction("on-met-action")
 
 	constraints := []ConstraintWithActions{
@@ -1260,7 +1260,7 @@ func TestConstraintChecker_SingleConstraintMet(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1271,7 +1271,7 @@ func TestConstraintChecker_SingleConstraintMet(t *testing.T) {
 }
 
 func TestConstraintChecker_SingleConstraintViolated(t *testing.T) {
-	constraint := NewAlwaysFailConstraint("test-fail", false, []EvaluationPhase{EvaluationPhasePreExecution})
+	constraint := NewAlwaysFailConstraint("test-fail", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution})
 	onViolationAction := NewNoOpAction("on-violation-action")
 
 	constraints := []ConstraintWithActions{
@@ -1289,7 +1289,7 @@ func TestConstraintChecker_SingleConstraintViolated(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1302,17 +1302,17 @@ func TestConstraintChecker_SingleConstraintViolated(t *testing.T) {
 func TestConstraintChecker_MultipleConstraintsAllMet(t *testing.T) {
 	constraints := []ConstraintWithActions{
 		{
-			Constraint:  NewAlwaysPassConstraint("pass-1", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint:  NewAlwaysPassConstraint("pass-1", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			OnMet:       []Action{NewNoOpAction("action-1")},
 			OnViolation: []Action{},
 		},
 		{
-			Constraint:  NewAlwaysPassConstraint("pass-2", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint:  NewAlwaysPassConstraint("pass-2", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			OnMet:       []Action{NewNoOpAction("action-2")},
 			OnViolation: []Action{},
 		},
 		{
-			Constraint:  NewAlwaysPassConstraint("pass-3", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint:  NewAlwaysPassConstraint("pass-3", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			OnMet:       []Action{NewNoOpAction("action-3")},
 			OnViolation: []Action{},
 		},
@@ -1325,7 +1325,7 @@ func TestConstraintChecker_MultipleConstraintsAllMet(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1338,17 +1338,17 @@ func TestConstraintChecker_MultipleConstraintsAllMet(t *testing.T) {
 func TestConstraintChecker_MultipleConstraintsOneFails(t *testing.T) {
 	constraints := []ConstraintWithActions{
 		{
-			Constraint:  NewAlwaysPassConstraint("pass-1", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint:  NewAlwaysPassConstraint("pass-1", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			OnMet:       []Action{NewNoOpAction("action-1")},
 			OnViolation: []Action{},
 		},
 		{
-			Constraint:  NewAlwaysFailConstraint("fail-1", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint:  NewAlwaysFailConstraint("fail-1", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			OnMet:       []Action{},
 			OnViolation: []Action{NewNoOpAction("fail-action")},
 		},
 		{
-			Constraint:  NewAlwaysPassConstraint("pass-2", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint:  NewAlwaysPassConstraint("pass-2", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			OnMet:       []Action{NewNoOpAction("action-2")},
 			OnViolation: []Action{},
 		},
@@ -1361,7 +1361,7 @@ func TestConstraintChecker_MultipleConstraintsOneFails(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1381,7 +1381,7 @@ func TestConstraintChecker_NoConstraints(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1392,7 +1392,7 @@ func TestConstraintChecker_NoConstraints(t *testing.T) {
 }
 
 func TestConstraintChecker_MultipleActionsOnViolation(t *testing.T) {
-	constraint := NewAlwaysFailConstraint("test-fail", false, []EvaluationPhase{EvaluationPhasePreExecution})
+	constraint := NewAlwaysFailConstraint("test-fail", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution})
 
 	constraints := []ConstraintWithActions{
 		{
@@ -1413,7 +1413,7 @@ func TestConstraintChecker_MultipleActionsOnViolation(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1430,15 +1430,15 @@ func TestConstraintChecker_ActionExecutionError(t *testing.T) {
 func TestConstraintChecker_ShouldRecheckOnRetry_True(t *testing.T) {
 	constraints := []ConstraintWithActions{
 		{
-			Constraint:     NewAlwaysPassConstraint("pass-1", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint:     NewAlwaysPassConstraint("pass-1", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			RecheckOnRetry: false,
 		},
 		{
-			Constraint:     NewAlwaysPassConstraint("pass-2", true, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint:     NewAlwaysPassConstraint("pass-2", true, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			RecheckOnRetry: true,
 		},
 		{
-			Constraint:     NewAlwaysPassConstraint("pass-3", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint:     NewAlwaysPassConstraint("pass-3", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			RecheckOnRetry: false,
 		},
 	}
@@ -1450,7 +1450,7 @@ func TestConstraintChecker_ShouldRecheckOnRetry_True(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	if !checker.ShouldRecheckOnRetry(&db.Job{ID: "test-job"}) {
+	if !checker.ShouldRecheckOnRetry(&model.Job{ID: "test-job"}) {
 		t.Error("Expected ShouldRecheckOnRetry=true (one constraint has recheck=true)")
 	}
 }
@@ -1458,11 +1458,11 @@ func TestConstraintChecker_ShouldRecheckOnRetry_True(t *testing.T) {
 func TestConstraintChecker_ShouldRecheckOnRetry_False(t *testing.T) {
 	constraints := []ConstraintWithActions{
 		{
-			Constraint:     NewAlwaysPassConstraint("pass-1", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint:     NewAlwaysPassConstraint("pass-1", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			RecheckOnRetry: false,
 		},
 		{
-			Constraint:     NewAlwaysPassConstraint("pass-2", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint:     NewAlwaysPassConstraint("pass-2", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			RecheckOnRetry: false,
 		},
 	}
@@ -1474,7 +1474,7 @@ func TestConstraintChecker_ShouldRecheckOnRetry_False(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	if checker.ShouldRecheckOnRetry(&db.Job{ID: "test-job"}) {
+	if checker.ShouldRecheckOnRetry(&model.Job{ID: "test-job"}) {
 		t.Error("Expected ShouldRecheckOnRetry=false (all constraints have recheck=false)")
 	}
 }
@@ -1489,7 +1489,7 @@ func TestConstraintChecker_ShouldRecheckOnRetry_NoConstraints(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	if checker.ShouldRecheckOnRetry(&db.Job{ID: "test-job"}) {
+	if checker.ShouldRecheckOnRetry(&model.Job{ID: "test-job"}) {
 		t.Error("Expected ShouldRecheckOnRetry=false (no constraints)")
 	}
 }
@@ -1501,15 +1501,15 @@ func TestConstraintChecker_ShouldRecheckOnRetry_NoConstraints(t *testing.T) {
 func TestConstraintChecker_CheckPreExecution_OnlyRunsPrePhase(t *testing.T) {
 	constraints := []ConstraintWithActions{
 		{
-			Constraint: NewAlwaysPassConstraint("pre", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint: NewAlwaysPassConstraint("pre", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			OnMet:      []Action{NewNoOpAction("pre-action")},
 		},
 		{
-			Constraint: NewAlwaysPassConstraint("during", false, []EvaluationPhase{EvaluationPhaseDuringExecution}),
+			Constraint: NewAlwaysPassConstraint("during", false, []model.EvaluationPhase{model.EvaluationPhaseDuringExecution}),
 			OnMet:      []Action{NewNoOpAction("during-action")},
 		},
 		{
-			Constraint: NewAlwaysPassConstraint("post", false, []EvaluationPhase{EvaluationPhasePostExecution}),
+			Constraint: NewAlwaysPassConstraint("post", false, []model.EvaluationPhase{model.EvaluationPhasePostExecution}),
 			OnMet:      []Action{NewNoOpAction("post-action")},
 		},
 	}
@@ -1521,7 +1521,7 @@ func TestConstraintChecker_CheckPreExecution_OnlyRunsPrePhase(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1541,7 +1541,7 @@ func TestConstraintChecker_CheckDuringExecution_OnlyRunsDuringPhase(t *testing.T
 
 	constraints := []ConstraintWithActions{
 		{
-			Constraint: NewAlwaysPassConstraint("pre", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint: NewAlwaysPassConstraint("pre", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			OnMet:      []Action{NewNoOpAction("pre-action")},
 		},
 		{
@@ -1549,7 +1549,7 @@ func TestConstraintChecker_CheckDuringExecution_OnlyRunsDuringPhase(t *testing.T
 			OnMet:      []Action{NewNoOpAction("during-action")},
 		},
 		{
-			Constraint: NewAlwaysPassConstraint("post", false, []EvaluationPhase{EvaluationPhasePostExecution}),
+			Constraint: NewAlwaysPassConstraint("post", false, []model.EvaluationPhase{model.EvaluationPhasePostExecution}),
 			OnMet:      []Action{NewNoOpAction("post-action")},
 		},
 	}
@@ -1561,7 +1561,7 @@ func TestConstraintChecker_CheckDuringExecution_OnlyRunsDuringPhase(t *testing.T
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckDuringExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime)
+	result, err := checker.CheckDuringExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123", startTime)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1582,11 +1582,11 @@ func TestConstraintChecker_CheckPostExecution_OnlyRunsPostPhase(t *testing.T) {
 
 	constraints := []ConstraintWithActions{
 		{
-			Constraint: NewAlwaysPassConstraint("pre", false, []EvaluationPhase{EvaluationPhasePreExecution}),
+			Constraint: NewAlwaysPassConstraint("pre", false, []model.EvaluationPhase{model.EvaluationPhasePreExecution}),
 			OnMet:      []Action{NewNoOpAction("pre-action")},
 		},
 		{
-			Constraint: NewAlwaysPassConstraint("during", false, []EvaluationPhase{EvaluationPhaseDuringExecution}),
+			Constraint: NewAlwaysPassConstraint("during", false, []model.EvaluationPhase{model.EvaluationPhaseDuringExecution}),
 			OnMet:      []Action{NewNoOpAction("during-action")},
 		},
 		{
@@ -1602,7 +1602,7 @@ func TestConstraintChecker_CheckPostExecution_OnlyRunsPostPhase(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPostExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
+	result, err := checker.CheckPostExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1633,7 +1633,7 @@ func TestConstraintChecker_CheckDuringExecution_RequiresStartTime(t *testing.T) 
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckDuringExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime)
+	result, err := checker.CheckDuringExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123", startTime)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1660,7 +1660,7 @@ func TestConstraintChecker_CheckPostExecution_RequiresTiming(t *testing.T) {
 		testutil.CreateTestSlogLogger(),
 	)
 
-	result, err := checker.CheckPostExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
+	result, err := checker.CheckPostExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -1674,9 +1674,9 @@ func TestConstraintChecker_MultiplePhaseConstraint(t *testing.T) {
 	// Create a constraint that applies to multiple phases
 	constraints := []ConstraintWithActions{
 		{
-			Constraint: NewAlwaysPassConstraint("multi-phase", false, []EvaluationPhase{
-				EvaluationPhasePreExecution,
-				EvaluationPhasePostExecution,
+			Constraint: NewAlwaysPassConstraint("multi-phase", false, []model.EvaluationPhase{
+				model.EvaluationPhasePreExecution,
+				model.EvaluationPhasePostExecution,
 			}),
 			OnMet: []Action{NewNoOpAction("action")},
 		},
@@ -1690,7 +1690,7 @@ func TestConstraintChecker_MultiplePhaseConstraint(t *testing.T) {
 	)
 
 	// Should run in pre-execution
-	result, err := checker.CheckPreExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123")
+	result, err := checker.CheckPreExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123")
 	if err != nil {
 		t.Fatalf("Pre-execution: Expected no error, got: %v", err)
 	}
@@ -1700,7 +1700,7 @@ func TestConstraintChecker_MultiplePhaseConstraint(t *testing.T) {
 
 	// Should NOT run in during-execution
 	startTime := time.Now()
-	result, err = checker.CheckDuringExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime)
+	result, err = checker.CheckDuringExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123", startTime)
 	if err != nil {
 		t.Fatalf("During-execution: Expected no error, got: %v", err)
 	}
@@ -1710,7 +1710,7 @@ func TestConstraintChecker_MultiplePhaseConstraint(t *testing.T) {
 
 	// Should run in post-execution
 	endTime := time.Now()
-	result, err = checker.CheckPostExecution(context.Background(), &db.Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
+	result, err = checker.CheckPostExecution(context.Background(), &model.Job{ID: "test-job"}, "run-123", startTime, endTime, 0)
 	if err != nil {
 		t.Fatalf("Post-execution: Expected no error, got: %v", err)
 	}
@@ -1767,7 +1767,7 @@ func TestExecutionContext_CreatedWithDependencies(t *testing.T) {
 	if ctx.Logger == nil {
 		t.Error("Expected Logger to be set")
 	}
-	if ctx.SchedulerInbox == nil {
+	if ctx.Inbox == nil {
 		t.Error("Expected SchedulerInbox to be set")
 	}
 	if ctx.HTTPClient == nil {

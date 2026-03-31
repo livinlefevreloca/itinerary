@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"text/template"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // HTTPHealthCheckConstraint makes an HTTP request and checks for a 200 response
@@ -63,7 +65,7 @@ func NewHTTPHealthCheckConstraint(
 	}, nil
 }
 
-func (h *HTTPHealthCheckConstraint) Check(ctx *ExecutionContext) (ConstraintResult, error) {
+func (h *HTTPHealthCheckConstraint) Check(ctx *model.ExecutionContext) (model.ConstraintResult, error) {
 	// Template data
 	data := map[string]interface{}{
 		"JobName": ctx.Job.Name,
@@ -80,7 +82,7 @@ func (h *HTTPHealthCheckConstraint) Check(ctx *ExecutionContext) (ConstraintResu
 	// Execute URL template
 	var urlBuf bytes.Buffer
 	if err := h.urlTemplate.Execute(&urlBuf, data); err != nil {
-		return ConstraintResult{}, err
+		return model.ConstraintResult{}, err
 	}
 	url := urlBuf.String()
 
@@ -89,7 +91,7 @@ func (h *HTTPHealthCheckConstraint) Check(ctx *ExecutionContext) (ConstraintResu
 	for key, tmpl := range h.headerTemplates {
 		var buf bytes.Buffer
 		if err := tmpl.Execute(&buf, data); err != nil {
-			return ConstraintResult{}, err
+			return model.ConstraintResult{}, err
 		}
 		headers[key] = buf.String()
 	}
@@ -100,7 +102,7 @@ func (h *HTTPHealthCheckConstraint) Check(ctx *ExecutionContext) (ConstraintResu
 
 	req, err := http.NewRequestWithContext(reqCtx, h.method, url, nil)
 	if err != nil {
-		return ConstraintResult{}, err
+		return model.ConstraintResult{}, err
 	}
 
 	for key, value := range headers {
@@ -109,13 +111,13 @@ func (h *HTTPHealthCheckConstraint) Check(ctx *ExecutionContext) (ConstraintResu
 
 	resp, err := ctx.HTTPClient.Do(req)
 	if err != nil {
-		return ConstraintResult{}, err
+		return model.ConstraintResult{}, err
 	}
 	defer resp.Body.Close()
 
 	met := resp.StatusCode == 200
 
-	return ConstraintResult{
+	return model.ConstraintResult{
 		Met: met,
 		Message: fmt.Sprintf("HTTP %s %s returned %d",
 			h.method, url, resp.StatusCode),
@@ -126,8 +128,8 @@ func (h *HTTPHealthCheckConstraint) Name() string {
 	return h.name
 }
 
-func (h *HTTPHealthCheckConstraint) EvaluationTiming() []EvaluationPhase {
-	return []EvaluationPhase{EvaluationPhasePreExecution}
+func (h *HTTPHealthCheckConstraint) EvaluationTiming() []model.EvaluationPhase {
+	return []model.EvaluationPhase{model.EvaluationPhasePreExecution}
 }
 
 func (h *HTTPHealthCheckConstraint) ShouldRecheckOnRetry() bool {

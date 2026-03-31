@@ -3,6 +3,8 @@ package db
 import (
 	"database/sql"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // =============================================================================
@@ -10,8 +12,8 @@ import (
 // =============================================================================
 
 // GetConstraintType retrieves a constraint type by ID
-func (db *DB) GetConstraintType(id int) (*ConstraintType, error) {
-	ct := &ConstraintType{}
+func (db *DB) GetConstraintType(id int) (*model.ConstraintType, error) {
+	ct := &model.ConstraintType{}
 
 	query := `SELECT id, name FROM constraint_types WHERE id = ?`
 
@@ -28,7 +30,7 @@ func (db *DB) GetConstraintType(id int) (*ConstraintType, error) {
 }
 
 // GetAllConstraintTypes retrieves all constraint types
-func (db *DB) GetAllConstraintTypes() ([]ConstraintType, error) {
+func (db *DB) GetAllConstraintTypes() ([]model.ConstraintType, error) {
 	query := `SELECT id, name FROM constraint_types ORDER BY id`
 
 	rows, err := db.Query(query)
@@ -37,9 +39,9 @@ func (db *DB) GetAllConstraintTypes() ([]ConstraintType, error) {
 	}
 	defer rows.Close()
 
-	var types []ConstraintType
+	var types []model.ConstraintType
 	for rows.Next() {
-		var ct ConstraintType
+		var ct model.ConstraintType
 		if err := rows.Scan(&ct.ID, &ct.Name); err != nil {
 			return nil, err
 		}
@@ -51,7 +53,7 @@ func (db *DB) GetAllConstraintTypes() ([]ConstraintType, error) {
 	}
 
 	if types == nil {
-		types = []ConstraintType{}
+		types = []model.ConstraintType{}
 	}
 
 	return types, nil
@@ -62,7 +64,7 @@ func (db *DB) GetAllConstraintTypes() ([]ConstraintType, error) {
 // =============================================================================
 
 // CreateConstraint creates a new constraint for a job
-func (db *DB) CreateConstraint(constraint *Constraint) error {
+func (db *DB) CreateConstraint(constraint *model.ConstraintConfig) error {
 	now := time.Now()
 	constraint.CreatedAt = now
 
@@ -82,8 +84,8 @@ func (db *DB) CreateConstraint(constraint *Constraint) error {
 }
 
 // GetConstraint retrieves a constraint by ID
-func (db *DB) GetConstraint(id string) (*Constraint, error) {
-	constraint := &Constraint{}
+func (db *DB) GetConstraint(id string) (*model.ConstraintConfig, error) {
+	constraint := &model.ConstraintConfig{}
 
 	query := `SELECT id, job_id, constraint_type_id, config, created_at FROM constraints WHERE id = ?`
 
@@ -107,7 +109,7 @@ func (db *DB) GetConstraint(id string) (*Constraint, error) {
 }
 
 // GetConstraintsByJob retrieves all constraints for a job
-func (db *DB) GetConstraintsByJob(jobID string) ([]Constraint, error) {
+func (db *DB) GetConstraintsByJob(jobID string) ([]model.ConstraintConfig, error) {
 	query := `
 		SELECT id, job_id, constraint_type_id, config, created_at
 		FROM constraints
@@ -121,9 +123,9 @@ func (db *DB) GetConstraintsByJob(jobID string) ([]Constraint, error) {
 	}
 	defer rows.Close()
 
-	var constraints []Constraint
+	var constraints []model.ConstraintConfig
 	for rows.Next() {
-		var c Constraint
+		var c model.ConstraintConfig
 		err := rows.Scan(&c.ID, &c.JobID, &c.ConstraintTypeID, &c.Config, &c.CreatedAt)
 		if err != nil {
 			return nil, err
@@ -136,7 +138,7 @@ func (db *DB) GetConstraintsByJob(jobID string) ([]Constraint, error) {
 	}
 
 	if constraints == nil {
-		constraints = []Constraint{}
+		constraints = []model.ConstraintConfig{}
 	}
 
 	return constraints, nil
@@ -168,7 +170,7 @@ func (db *DB) DeleteConstraint(id string) error {
 // =============================================================================
 
 // CreateConstraintRun records a constraint check execution
-func (db *DB) CreateConstraintRun(constraintRun *ConstraintRun) error {
+func (db *DB) CreateConstraintRun(constraintRun *model.ConstraintRun) error {
 	query := `
 		INSERT INTO constraint_runs (id, run_id, constraint_id, executed_at, success, violated, in_error, error, details)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -189,7 +191,7 @@ func (db *DB) CreateConstraintRun(constraintRun *ConstraintRun) error {
 }
 
 // GetConstraintRuns retrieves all constraint runs for a job run
-func (db *DB) GetConstraintRuns(runID string) ([]ConstraintRun, error) {
+func (db *DB) GetConstraintRuns(runID string) ([]model.ConstraintRun, error) {
 	query := `
 		SELECT id, run_id, constraint_id, executed_at, success, violated, in_error, error, details
 		FROM constraint_runs
@@ -203,9 +205,9 @@ func (db *DB) GetConstraintRuns(runID string) ([]ConstraintRun, error) {
 	}
 	defer rows.Close()
 
-	var constraintRuns []ConstraintRun
+	var constraintRuns []model.ConstraintRun
 	for rows.Next() {
-		var cr ConstraintRun
+		var cr model.ConstraintRun
 		err := rows.Scan(
 			&cr.ID,
 			&cr.RunID,
@@ -228,14 +230,14 @@ func (db *DB) GetConstraintRuns(runID string) ([]ConstraintRun, error) {
 	}
 
 	if constraintRuns == nil {
-		constraintRuns = []ConstraintRun{}
+		constraintRuns = []model.ConstraintRun{}
 	}
 
 	return constraintRuns, nil
 }
 
 // GetConstraintRunsByConstraint retrieves constraint runs for a specific constraint
-func (db *DB) GetConstraintRunsByConstraint(constraintID string, limit int) ([]ConstraintRun, error) {
+func (db *DB) GetConstraintRunsByConstraint(constraintID string, limit int) ([]model.ConstraintRun, error) {
 	query := `
 		SELECT id, run_id, constraint_id, executed_at, success, violated, in_error, error, details
 		FROM constraint_runs
@@ -250,9 +252,9 @@ func (db *DB) GetConstraintRunsByConstraint(constraintID string, limit int) ([]C
 	}
 	defer rows.Close()
 
-	var constraintRuns []ConstraintRun
+	var constraintRuns []model.ConstraintRun
 	for rows.Next() {
-		var cr ConstraintRun
+		var cr model.ConstraintRun
 		err := rows.Scan(
 			&cr.ID,
 			&cr.RunID,
@@ -275,7 +277,7 @@ func (db *DB) GetConstraintRunsByConstraint(constraintID string, limit int) ([]C
 	}
 
 	if constraintRuns == nil {
-		constraintRuns = []ConstraintRun{}
+		constraintRuns = []model.ConstraintRun{}
 	}
 
 	return constraintRuns, nil

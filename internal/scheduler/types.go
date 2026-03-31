@@ -4,19 +4,19 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/livinlefevreloca/itinerary/internal/db"
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // OrchestratorState tracks the state of an orchestrator in the scheduler
 type OrchestratorState struct {
 	RunID            string
 	JobID            string
-	JobConfig        *db.Job // Current job configuration
+	JobConfig        *model.Job // Current job configuration
 	ScheduledAt      time.Time
 	ActualStart      time.Time
 	Status           OrchestratorStatus
 	CancelChan       chan struct{}
-	ConfigUpdate     chan *db.Job // For updating config while in PreRun
+	ConfigUpdate     chan *model.Job // For updating config while in PreRun
 	CompletedAt      time.Time
 	LastHeartbeat    time.Time // Last time heartbeat was received
 	MissedHeartbeats int       // Consecutive missed heartbeats
@@ -29,8 +29,7 @@ const (
 	// Pre-execution states
 	OrchestratorPreRun           OrchestratorStatus = iota // Created, waiting for start time
 	OrchestratorPending                                    // Initial pre-execution phase
-	OrchestratorConditionRunning                           // Checking pre-execution constraints
-	OrchestratorActionRunning                              // Taking action based on constraint violation
+	OrchestratorConditionRunning                           // Checking pre-execution constraints and running associated actions
 
 	// Execution states
 	OrchestratorContainerCreating // Creating Kubernetes pod/container
@@ -53,8 +52,6 @@ func (s OrchestratorStatus) String() string {
 		return "pending"
 	case OrchestratorConditionRunning:
 		return "condition_running"
-	case OrchestratorActionRunning:
-		return "action_running"
 	case OrchestratorContainerCreating:
 		return "container_creating"
 	case OrchestratorRunning:

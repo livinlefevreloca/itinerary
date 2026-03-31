@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/livinlefevreloca/itinerary/internal/db"
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // MockDB provides a mock database for testing
 type MockDB struct {
 	mu             sync.Mutex
-	jobs           []*db.Job
+	jobs           []*model.Job
 	writtenUpdates []interface{}
 	writtenStats   []interface{}
 	queryError     error
@@ -26,13 +26,13 @@ type MockDB struct {
 
 func NewMockDB() *MockDB {
 	return &MockDB{
-		jobs:           make([]*db.Job, 0),
+		jobs:           make([]*model.Job, 0),
 		writtenUpdates: make([]interface{}, 0),
 		writtenStats:   make([]interface{}, 0),
 	}
 }
 
-func (m *MockDB) SetJobs(jobs []*db.Job) {
+func (m *MockDB) SetJobs(jobs []*model.Job) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.jobs = jobs
@@ -689,6 +689,79 @@ func (m *MockMetadataUpdater) Reset() {
 	m.calls = make([]MetadataUpdateCall, 0)
 	m.shouldFail = false
 	m.returnError = nil
+}
+
+// =============================================================================
+// Constraint test helpers
+// =============================================================================
+
+// NoOpAction is a test action that does nothing
+type NoOpAction struct {
+	name string
+}
+
+// NewNoOpAction creates a NoOpAction with the given name
+func NewNoOpAction(name string) *NoOpAction {
+	return &NoOpAction{name: name}
+}
+
+// Execute implements the Action interface
+func (n *NoOpAction) Execute(ctx *model.ExecutionContext) error {
+	return nil
+}
+
+// Name implements the Action interface
+func (n *NoOpAction) Name() string {
+	return n.name
+}
+
+// NewTestExecutionContext creates a minimal ExecutionContext for constraint and action tests
+func NewTestExecutionContext() *model.ExecutionContext {
+	return &model.ExecutionContext{
+		Job:        &model.Job{ID: "test-job", Name: "test"},
+		RunID:      "test-run-id",
+		Inbox:      NewMockSchedulerInbox(),
+		HTTPClient: CreateTestHTTPClient(),
+		Logger:     CreateTestSlogLogger(),
+		Context:    context.Background(),
+	}
+}
+
+// NewTestExecutionContextWithStartTime creates an ExecutionContext with a start time set
+func NewTestExecutionContextWithStartTime(startTime time.Time) *model.ExecutionContext {
+	ctx := NewTestExecutionContext()
+	ctx.StartTime = &startTime
+	return ctx
+}
+
+// NewTestExecutionContextWithTiming creates an ExecutionContext with full timing set
+func NewTestExecutionContextWithTiming(startTime, endTime time.Time, exitCode int) *model.ExecutionContext {
+	ctx := NewTestExecutionContext()
+	ctx.StartTime = &startTime
+	ctx.EndTime = &endTime
+	ctx.ExitCode = &exitCode
+	return ctx
+}
+
+// StateRecorder records state transition names for testing orchestrator paths.
+// It implements orchestrator.Recorder via duck typing (no import needed).
+type StateRecorder struct {
+	path []string
+}
+
+// NewStateRecorder creates a new StateRecorder
+func NewStateRecorder() *StateRecorder {
+	return &StateRecorder{path: make([]string, 0)}
+}
+
+// Record records a state name
+func (r *StateRecorder) Record(name string) {
+	r.path = append(r.path, name)
+}
+
+// Path returns the recorded state names in order
+func (r *StateRecorder) Path() []string {
+	return r.path
 }
 
 // MockMetricRecorder implements MetricRecorder for testing

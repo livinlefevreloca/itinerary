@@ -3,8 +3,8 @@ package scheduler
 import (
 	"time"
 
-	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/inbox"
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // InboxMessage is the container for all messages sent to the scheduler
@@ -94,7 +94,7 @@ type CancelRunMsg struct {
 // UpdateRunConfigMsg updates the configuration for a job while in PreRun state
 type UpdateRunConfigMsg struct {
 	RunID     string
-	NewConfig *db.Job
+	NewConfig *model.Job
 }
 
 // GetOrchestratorStateMsg requests the state of a specific orchestrator
@@ -122,6 +122,7 @@ type GetStatsMsg struct{}
 // JobStateSyncerStats provides current job state syncer statistics
 type JobStateSyncerStats struct {
 	BufferedJobRunUpdates int
+	DroppedUpdates        int64
 }
 
 // StatsResponse is the response to GetStatsMsg

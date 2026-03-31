@@ -1,6 +1,10 @@
 package constraints
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/livinlefevreloca/itinerary/internal/model"
+)
 
 // OtherJobRunningConstraint checks if another job is currently running
 type OtherJobRunningConstraint struct {
@@ -20,38 +24,29 @@ func NewOtherJobRunningConstraint(name string, otherJobID string, shouldBeRunnin
 	}
 }
 
-func (o *OtherJobRunningConstraint) Check(ctx *ExecutionContext) (ConstraintResult, error) {
-	responseChan := make(chan interface{}, 1)
-	request := &JobStateRequest{
-		JobID:      o.otherJobID,
-		ResponseTo: responseChan,
+func (o *OtherJobRunningConstraint) Check(ctx *model.ExecutionContext) (model.ConstraintResult, error) {
+	request := &model.JobStateRequest{JobID: o.otherJobID}
+	resp, err := model.SendAndReceive(ctx.Context, ctx.Inbox, request)
+	if err != nil {
+		return model.ConstraintResult{}, err
 	}
 
-	if err := ctx.SchedulerInbox.Send(request); err != nil {
-		return ConstraintResult{}, err
-	}
+	state := resp.(*model.JobStateResponse)
+	met := state.IsRunning == o.shouldBeRunning
 
-	select {
-	case resp := <-responseChan:
-		state := resp.(*JobStateResponse)
-		met := state.IsRunning == o.shouldBeRunning
-
-		return ConstraintResult{
-			Met: met,
-			Message: fmt.Sprintf("job %s running=%v (expected=%v)",
-				o.otherJobID, state.IsRunning, o.shouldBeRunning),
-		}, nil
-	case <-ctx.Context.Done():
-		return ConstraintResult{}, ctx.Context.Err()
-	}
+	return model.ConstraintResult{
+		Met: met,
+		Message: fmt.Sprintf("job %s running=%v (expected=%v)",
+			o.otherJobID, state.IsRunning, o.shouldBeRunning),
+	}, nil
 }
 
 func (o *OtherJobRunningConstraint) Name() string {
 	return o.name
 }
 
-func (o *OtherJobRunningConstraint) EvaluationTiming() []EvaluationPhase {
-	return []EvaluationPhase{EvaluationPhasePreExecution}
+func (o *OtherJobRunningConstraint) EvaluationTiming() []model.EvaluationPhase {
+	return []model.EvaluationPhase{model.EvaluationPhasePreExecution}
 }
 
 func (o *OtherJobRunningConstraint) ShouldRecheckOnRetry() bool {

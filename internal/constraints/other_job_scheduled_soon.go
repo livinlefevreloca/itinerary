@@ -3,6 +3,8 @@ package constraints
 import (
 	"fmt"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // OtherJobScheduledSoonConstraint checks if another job is scheduled to run within a specified time window
@@ -23,47 +25,38 @@ func NewOtherJobScheduledSoonConstraint(name string, otherJobID string, within t
 	}
 }
 
-func (o *OtherJobScheduledSoonConstraint) Check(ctx *ExecutionContext) (ConstraintResult, error) {
-	responseChan := make(chan interface{}, 1)
-	request := &JobStateRequest{
-		JobID:      o.otherJobID,
-		ResponseTo: responseChan,
+func (o *OtherJobScheduledSoonConstraint) Check(ctx *model.ExecutionContext) (model.ConstraintResult, error) {
+	request := &model.JobStateRequest{JobID: o.otherJobID}
+	resp, err := model.SendAndReceive(ctx.Context, ctx.Inbox, request)
+	if err != nil {
+		return model.ConstraintResult{}, err
 	}
 
-	if err := ctx.SchedulerInbox.Send(request); err != nil {
-		return ConstraintResult{}, err
-	}
+	state := resp.(*model.JobStateResponse)
 
-	select {
-	case resp := <-responseChan:
-		state := resp.(*JobStateResponse)
-
-		if state.NextRun == nil {
-			return ConstraintResult{
-				Met:     false,
-				Message: fmt.Sprintf("job %s has no scheduled runs", o.otherJobID),
-			}, nil
-		}
-
-		timeUntilRun := time.Until(*state.NextRun)
-		met := timeUntilRun > 0 && timeUntilRun <= o.within
-
-		return ConstraintResult{
-			Met: met,
-			Message: fmt.Sprintf("job %s scheduled in %v",
-				o.otherJobID, timeUntilRun.Round(time.Second)),
+	if state.NextRun == nil {
+		return model.ConstraintResult{
+			Met:     false,
+			Message: fmt.Sprintf("job %s has no scheduled runs", o.otherJobID),
 		}, nil
-	case <-ctx.Context.Done():
-		return ConstraintResult{}, ctx.Context.Err()
 	}
+
+	timeUntilRun := time.Until(*state.NextRun)
+	met := timeUntilRun > 0 && timeUntilRun <= o.within
+
+	return model.ConstraintResult{
+		Met: met,
+		Message: fmt.Sprintf("job %s scheduled in %v",
+			o.otherJobID, timeUntilRun.Round(time.Second)),
+	}, nil
 }
 
 func (o *OtherJobScheduledSoonConstraint) Name() string {
 	return o.name
 }
 
-func (o *OtherJobScheduledSoonConstraint) EvaluationTiming() []EvaluationPhase {
-	return []EvaluationPhase{EvaluationPhasePreExecution}
+func (o *OtherJobScheduledSoonConstraint) EvaluationTiming() []model.EvaluationPhase {
+	return []model.EvaluationPhase{model.EvaluationPhasePreExecution}
 }
 
 func (o *OtherJobScheduledSoonConstraint) ShouldRecheckOnRetry() bool {

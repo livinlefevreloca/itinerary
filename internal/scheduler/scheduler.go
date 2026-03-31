@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/cron"
+	"github.com/livinlefevreloca/itinerary/internal/model"
 	"github.com/livinlefevreloca/itinerary/internal/inbox"
 	"github.com/livinlefevreloca/itinerary/internal/scheduler/index"
 )
@@ -159,7 +159,7 @@ func (s *Scheduler) scheduleOrchestrators(now time.Time) error {
 
 		// Create orchestrator state
 		cancelChan := make(chan struct{})
-		configUpdateChan := make(chan *db.Job, 1)
+		configUpdateChan := make(chan *model.Job, 1)
 
 		state := &OrchestratorState{
 			RunID:         runID,
@@ -614,7 +614,7 @@ func (s *Scheduler) performIndexBuild(db interface{}) error {
 }
 
 // queryJobDefinitions queries job definitions from the database
-func queryJobDefinitions(database interface{}) ([]*db.Job, error) {
+func queryJobDefinitions(database interface{}) ([]*model.Job, error) {
 	// Use type assertion to handle MockDB for testing
 	type jobQuerier interface {
 		QueryJobDefinitions() (interface{}, error)
@@ -626,31 +626,31 @@ func queryJobDefinitions(database interface{}) ([]*db.Job, error) {
 			return nil, err
 		}
 
-		// Convert from []*testutil.Job (which is now []*db.Job) via reflection
+		// Convert from []*testutil.Job (which is now []*model.Job) via reflection
 		val := reflect.ValueOf(jobsInterface)
 		if val.Kind() != reflect.Slice {
-			return []*db.Job{}, fmt.Errorf("expected slice from QueryJobDefinitions, got %T", jobsInterface)
+			return []*model.Job{}, fmt.Errorf("expected slice from QueryJobDefinitions, got %T", jobsInterface)
 		}
 
-		result := make([]*db.Job, val.Len())
+		result := make([]*model.Job, val.Len())
 		for i := 0; i < val.Len(); i++ {
 			elem := val.Index(i)
-			if job, ok := elem.Interface().(*db.Job); ok {
+			if job, ok := elem.Interface().(*model.Job); ok {
 				result[i] = job
 			} else {
-				return nil, fmt.Errorf("expected *db.Job, got %T", elem.Interface())
+				return nil, fmt.Errorf("expected *model.Job, got %T", elem.Interface())
 			}
 		}
 		return result, nil
 	}
 
 	// TODO: Actual database query for production
-	return []*db.Job{}, nil
+	return []*model.Job{}, nil
 }
 
 // runOrchestrator launches and manages a single orchestrator goroutine
 // TODO: Implement actual orchestrator creation and management
-func (s *Scheduler) runOrchestrator(jobID string, scheduledAt time.Time, runID string, cancelChan chan struct{}, configUpdateChan chan *db.Job) {
+func (s *Scheduler) runOrchestrator(jobID string, scheduledAt time.Time, runID string, cancelChan chan struct{}, configUpdateChan chan *model.Job) {
 	s.logger.Info("orchestrator stub launched",
 		"run_id", runID,
 		"job_id", jobID,

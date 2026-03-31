@@ -3,6 +3,8 @@ package constraints
 import (
 	"fmt"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // OtherJobCompletedRecentlyConstraint checks if another job completed within a specified time window
@@ -25,53 +27,43 @@ func NewOtherJobCompletedRecentlyConstraint(name string, otherJobID string, with
 	}
 }
 
-func (o *OtherJobCompletedRecentlyConstraint) Check(ctx *ExecutionContext) (ConstraintResult, error) {
-	responseChan := make(chan interface{}, 1)
-	request := &JobHistoryRequest{
-		JobID:      o.otherJobID,
-		Limit:      1,
-		ResponseTo: responseChan,
+func (o *OtherJobCompletedRecentlyConstraint) Check(ctx *model.ExecutionContext) (model.ConstraintResult, error) {
+	request := &model.JobHistoryRequest{JobID: o.otherJobID, Limit: 1}
+	resp, err := model.SendAndReceive(ctx.Context, ctx.Inbox, request)
+	if err != nil {
+		return model.ConstraintResult{}, err
 	}
 
-	if err := ctx.SchedulerInbox.Send(request); err != nil {
-		return ConstraintResult{}, err
-	}
+	history := resp.(*model.JobHistoryResponse)
 
-	select {
-	case resp := <-responseChan:
-		history := resp.(*JobHistoryResponse)
-
-		if len(history.Runs) == 0 {
-			return ConstraintResult{
-				Met:     false,
-				Message: fmt.Sprintf("job %s has no recent runs", o.otherJobID),
-			}, nil
-		}
-
-		lastRun := history.Runs[0]
-		timeSinceCompletion := time.Since(lastRun.CompletedAt)
-
-		met := timeSinceCompletion <= o.within
-		if o.mustSucceed {
-			met = met && lastRun.Success
-		}
-
-		return ConstraintResult{
-			Met: met,
-			Message: fmt.Sprintf("job %s last completed %v ago (success=%v)",
-				o.otherJobID, timeSinceCompletion.Round(time.Second), lastRun.Success),
+	if len(history.Runs) == 0 {
+		return model.ConstraintResult{
+			Met:     false,
+			Message: fmt.Sprintf("job %s has no recent runs", o.otherJobID),
 		}, nil
-	case <-ctx.Context.Done():
-		return ConstraintResult{}, ctx.Context.Err()
 	}
+
+	lastRun := history.Runs[0]
+	timeSinceCompletion := time.Since(lastRun.CompletedAt)
+
+	met := timeSinceCompletion <= o.within
+	if o.mustSucceed {
+		met = met && lastRun.Success
+	}
+
+	return model.ConstraintResult{
+		Met: met,
+		Message: fmt.Sprintf("job %s last completed %v ago (success=%v)",
+			o.otherJobID, timeSinceCompletion.Round(time.Second), lastRun.Success),
+	}, nil
 }
 
 func (o *OtherJobCompletedRecentlyConstraint) Name() string {
 	return o.name
 }
 
-func (o *OtherJobCompletedRecentlyConstraint) EvaluationTiming() []EvaluationPhase {
-	return []EvaluationPhase{EvaluationPhasePreExecution}
+func (o *OtherJobCompletedRecentlyConstraint) EvaluationTiming() []model.EvaluationPhase {
+	return []model.EvaluationPhase{model.EvaluationPhasePreExecution}
 }
 
 func (o *OtherJobCompletedRecentlyConstraint) ShouldRecheckOnRetry() bool {

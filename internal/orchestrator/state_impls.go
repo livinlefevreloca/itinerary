@@ -25,13 +25,10 @@ func (s *PendingState) ToCancelled() *CancelledState {
 	return &CancelledState{}
 }
 
-// ConditionRunningState - checking pre-execution requirements
+// ConditionRunningState - checking pre-execution requirements and running associated actions
 type ConditionRunningState struct{}
 
 func (s *ConditionRunningState) Name() string { return "condition_running" }
-func (s *ConditionRunningState) ToActionRunning() *ActionRunningState {
-	return &ActionRunningState{}
-}
 func (s *ConditionRunningState) ToContainerCreating() *ContainerCreatingState {
 	return &ContainerCreatingState{}
 }
@@ -39,23 +36,6 @@ func (s *ConditionRunningState) ToFailed() *FailedState {
 	return &FailedState{}
 }
 func (s *ConditionRunningState) ToCancelled() *CancelledState {
-	return &CancelledState{}
-}
-
-// ActionRunningState - taking action based on requirement outcome
-type ActionRunningState struct{}
-
-func (s *ActionRunningState) Name() string { return "action_running" }
-func (s *ActionRunningState) ToContainerCreating() *ContainerCreatingState {
-	return &ContainerCreatingState{}
-}
-func (s *ActionRunningState) ToCompleted() *CompletedState {
-	return &CompletedState{}
-}
-func (s *ActionRunningState) ToFailed() *FailedState {
-	return &FailedState{}
-}
-func (s *ActionRunningState) ToCancelled() *CancelledState {
 	return &CancelledState{}
 }
 

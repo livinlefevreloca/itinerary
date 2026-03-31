@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/livinlefevreloca/itinerary/internal/model"
 	_ "modernc.org/sqlite"
 )
 
@@ -38,7 +39,7 @@ func SeedTestData(t *testing.T, db *DB) {
 	t.Helper()
 
 	// Insert test jobs
-	jobs := []*Job{
+	jobs := []*model.Job{
 		{
 			ID:       "job-1",
 			Name:     "Test Job 1",
@@ -61,8 +62,8 @@ func SeedTestData(t *testing.T, db *DB) {
 }
 
 // MakeTestJob creates a job with default test values
-func MakeTestJob(id string) *Job {
-	return &Job{
+func MakeTestJob(id string) *model.Job {
+	return &model.Job{
 		ID:       id,
 		Name:     "Test Job " + id,
 		Schedule: "0 0 * * *",
@@ -71,8 +72,8 @@ func MakeTestJob(id string) *Job {
 }
 
 // MakeTestJobRun creates a job run with default test values
-func MakeTestJobRun(jobID string, scheduledAt time.Time) *JobRun {
-	return &JobRun{
+func MakeTestJobRun(jobID string, scheduledAt time.Time) *model.JobRun {
+	return &model.JobRun{
 		JobID:       jobID,
 		RunID:       "run-" + jobID + "-" + scheduledAt.Format("20060102150405"),
 		ScheduledAt: scheduledAt,
@@ -187,7 +188,7 @@ func TestClose(t *testing.T) {
 func TestCreateJob(t *testing.T) {
 	db := NewTestDB(t)
 
-	job := &Job{
+	job := &model.Job{
 		ID:       "test-job-1",
 		Name:     "Test Job",
 		Schedule: "0 0 * * *",
@@ -277,7 +278,7 @@ func TestGetAllJobs(t *testing.T) {
 	db := NewTestDB(t)
 
 	// Create multiple jobs
-	jobs := []*Job{
+	jobs := []*model.Job{
 		MakeTestJob("job-1"),
 		MakeTestJob("job-2"),
 		MakeTestJob("job-3"),
@@ -434,7 +435,7 @@ func TestCreateJobRun(t *testing.T) {
 	}
 
 	scheduledAt := time.Now()
-	run := &JobRun{
+	run := &model.JobRun{
 		JobID:       "test-job",
 		RunID:       "run-123",
 		ScheduledAt: scheduledAt,
@@ -841,7 +842,7 @@ func TestCreateConstraintRun(t *testing.T) {
 	SeedTestData(t, db)
 
 	// Create a constraint for the job
-	constraint := &Constraint{
+	constraint := &model.ConstraintConfig{
 		ID:               "constraint-1",
 		JobID:            "job-1",
 		ConstraintTypeID: 7, // maxAllowedRunTime
@@ -857,7 +858,7 @@ func TestCreateConstraintRun(t *testing.T) {
 	}
 
 	details := `{"message": "Job exceeded maxAllowedRunTime", "threshold": "2h"}`
-	constraintRun := &ConstraintRun{
+	constraintRun := &model.ConstraintRun{
 		ID:           "constraint-run-1",
 		RunID:        run.RunID,
 		ConstraintID: constraint.ID,
@@ -878,13 +879,13 @@ func TestGetConstraintRuns(t *testing.T) {
 	SeedTestData(t, db)
 
 	// Create constraints
-	constraint1 := &Constraint{
+	constraint1 := &model.ConstraintConfig{
 		ID:               "constraint-1",
 		JobID:            "job-1",
 		ConstraintTypeID: 6, // maxExpectedRunTime
 		Config:           stringPtr(`{"value": "1h"}`),
 	}
-	constraint2 := &Constraint{
+	constraint2 := &model.ConstraintConfig{
 		ID:               "constraint-2",
 		JobID:            "job-1",
 		ConstraintTypeID: 7, // maxAllowedRunTime
@@ -901,7 +902,7 @@ func TestGetConstraintRuns(t *testing.T) {
 	// Create multiple constraint runs
 	details1 := `{"message": "Job exceeded maxExpectedRunTime"}`
 	details2 := `{"message": "Job exceeded maxAllowedRunTime"}`
-	constraintRun1 := &ConstraintRun{
+	constraintRun1 := &model.ConstraintRun{
 		ID:           "constraint-run-1",
 		RunID:        run.RunID,
 		ConstraintID: constraint1.ID,
@@ -911,7 +912,7 @@ func TestGetConstraintRuns(t *testing.T) {
 		InError:      false,
 		Details:      &details1,
 	}
-	constraintRun2 := &ConstraintRun{
+	constraintRun2 := &model.ConstraintRun{
 		ID:           "constraint-run-2",
 		RunID:        run.RunID,
 		ConstraintID: constraint2.ID,
@@ -945,7 +946,7 @@ func TestGetConstraintRunsByConstraint(t *testing.T) {
 	SeedTestData(t, db)
 
 	// Create constraint
-	constraint := &Constraint{
+	constraint := &model.ConstraintConfig{
 		ID:               "constraint-1",
 		JobID:            "job-1",
 		ConstraintTypeID: 7, // maxAllowedRunTime
@@ -959,7 +960,7 @@ func TestGetConstraintRunsByConstraint(t *testing.T) {
 	db.CreateJobRun(run2)
 
 	details := `{"message": "Job exceeded maxAllowedRunTime"}`
-	constraintRun1 := &ConstraintRun{
+	constraintRun1 := &model.ConstraintRun{
 		ID:           "constraint-run-1",
 		RunID:        run1.RunID,
 		ConstraintID: constraint.ID,
@@ -969,7 +970,7 @@ func TestGetConstraintRunsByConstraint(t *testing.T) {
 		InError:      false,
 		Details:      &details,
 	}
-	constraintRun2 := &ConstraintRun{
+	constraintRun2 := &model.ConstraintRun{
 		ID:           "constraint-run-2",
 		RunID:        run2.RunID,
 		ConstraintID: constraint.ID,
@@ -1010,7 +1011,7 @@ func stringPtr(s string) *string {
 func TestCreateSchedulerStats(t *testing.T) {
 	db := NewTestDB(t)
 
-	stats := &SchedulerStats{
+	stats := &model.SchedulerStats{
 		StatsPeriodID: "period-1",
 		StartTime:     time.Now().Add(-1 * time.Hour),
 		EndTime:       time.Now(),
@@ -1028,13 +1029,13 @@ func TestGetSchedulerStats(t *testing.T) {
 	db := NewTestDB(t)
 
 	now := time.Now()
-	stats1 := &SchedulerStats{
+	stats1 := &model.SchedulerStats{
 		StatsPeriodID: "period-1",
 		StartTime:     now.Add(-2 * time.Hour),
 		EndTime:       now.Add(-1 * time.Hour),
 		Iterations:    3600,
 	}
-	stats2 := &SchedulerStats{
+	stats2 := &model.SchedulerStats{
 		StatsPeriodID: "period-2",
 		StartTime:     now.Add(-1 * time.Hour),
 		EndTime:       now,

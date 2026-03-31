@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/livinlefevreloca/itinerary/internal/constraints"
-	"github.com/livinlefevreloca/itinerary/internal/db"
+	"github.com/livinlefevreloca/itinerary/internal/model"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -15,7 +15,7 @@ type Orchestrator struct {
 	// Core identification
 	runID       string
 	jobID       string
-	jobConfig   *db.Job
+	jobConfig   *model.Job
 	scheduledAt time.Time
 
 	// State management
@@ -23,7 +23,7 @@ type Orchestrator struct {
 
 	// Communication channels
 	cancelChan   chan struct{}
-	configUpdate chan *db.Job
+	configUpdate chan *model.Job
 
 	// Dependencies
 	constraintChecker constraints.ConstraintChecker
@@ -42,13 +42,13 @@ type Orchestrator struct {
 	err      error
 
 	// Optional state recorder for testing
-	recorder *StateRecorder
+	recorder Recorder
 }
 
 // NewOrchestrator creates a new orchestrator instance
 func NewOrchestrator(
 	runID string,
-	jobConfig *db.Job,
+	jobConfig *model.Job,
 	scheduledAt time.Time,
 	checker constraints.ConstraintChecker,
 	k8sClient kubernetes.Interface,
@@ -61,7 +61,7 @@ func NewOrchestrator(
 		scheduledAt:       scheduledAt,
 		state:             &PreRunState{},
 		cancelChan:        make(chan struct{}),
-		configUpdate:      make(chan *db.Job, 1),
+		configUpdate:      make(chan *model.Job, 1),
 		constraintChecker: checker,
 		k8sClient:         k8sClient,
 		logger:            logger,
@@ -82,7 +82,7 @@ func (o *Orchestrator) Cancel() {
 }
 
 // UpdateConfig sends a config update to the orchestrator
-func (o *Orchestrator) UpdateConfig(newConfig *db.Job) {
+func (o *Orchestrator) UpdateConfig(newConfig *model.Job) {
 	select {
 	case o.configUpdate <- newConfig:
 	default:
@@ -109,7 +109,7 @@ func (o *Orchestrator) transitionTo(newState State) {
 
 	// Record state for testing if recorder is present
 	if o.recorder != nil {
-		o.recorder.Record(newState)
+		o.recorder.Record(newState.Name())
 	}
 
 	// Log the transition
@@ -140,8 +140,6 @@ func (o *Orchestrator) run() {
 			o.runPending()
 		case *ConditionRunningState:
 			o.runConditionRunning()
-		case *ActionRunningState:
-			o.runActionRunning()
 		case *ContainerCreatingState:
 			o.runContainerCreating()
 		case *RunningState:
@@ -223,24 +221,6 @@ func (o *Orchestrator) runConditionRunning() {
 	}
 
 	// TODO: Implement constraint checking
-	// For now, just transition to container creating
-	o.timing.ExecutionStartedAt = time.Now()
-	o.transitionTo(state.ToContainerCreating())
-}
-
-// runActionRunning executes actions
-func (o *Orchestrator) runActionRunning() {
-	state := o.state.(*ActionRunningState)
-
-	// Check for cancellation
-	select {
-	case <-o.cancelChan:
-		o.transitionTo(state.ToCancelled())
-		return
-	default:
-	}
-
-	// TODO: Implement action execution
 	// For now, just transition to container creating
 	o.timing.ExecutionStartedAt = time.Now()
 	o.transitionTo(state.ToContainerCreating())

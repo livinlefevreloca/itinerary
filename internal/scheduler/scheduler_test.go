@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/livinlefevreloca/itinerary/internal/db"
 	"github.com/livinlefevreloca/itinerary/internal/inbox"
+	"github.com/livinlefevreloca/itinerary/internal/model"
 	"github.com/livinlefevreloca/itinerary/internal/testutil"
 )
 
@@ -82,7 +82,7 @@ func TestGenerateRunID_DifferentTimes(t *testing.T) {
 func TestNewScheduler_Success(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	mockDB := testutil.NewMockDB()
-	mockDB.SetJobs([]*db.Job{
+	mockDB.SetJobs([]*model.Job{
 		{ID: "job1", Schedule: "*/5 * * * *"},
 		{ID: "job2", Schedule: "0 * * * *"},
 	})
@@ -140,7 +140,7 @@ func TestNewScheduler_DBQueryFails(t *testing.T) {
 func TestNewScheduler_InvalidCronSchedule(t *testing.T) {
 	logger := testutil.NewTestLogger()
 	mockDB := testutil.NewMockDB()
-	mockDB.SetJobs([]*db.Job{
+	mockDB.SetJobs([]*model.Job{
 		{ID: "job1", Schedule: "*/5 * * * *"},       // Valid
 		{ID: "job2", Schedule: "invalid cron expr"}, // Invalid
 		{ID: "job3", Schedule: "0 * * * *"},         // Valid
@@ -652,7 +652,6 @@ func TestScheduler_CleanupOrchestrators_SkipsActive(t *testing.T) {
 		OrchestratorPreRun,
 		OrchestratorPending,
 		OrchestratorConditionRunning,
-		OrchestratorActionRunning,
 		OrchestratorContainerCreating,
 		OrchestratorRunning,
 		OrchestratorTerminating,

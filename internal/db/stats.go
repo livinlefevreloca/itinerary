@@ -1,9 +1,13 @@
 package db
 
-import "time"
+import (
+	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/model"
+)
 
 // CreateSchedulerStats inserts scheduler statistics
-func (db *DB) CreateSchedulerStats(stats *SchedulerStats) error {
+func (db *DB) CreateSchedulerStats(stats *model.SchedulerStats) error {
 	query := `
 		INSERT INTO scheduler_stats (
 			stats_period_id, start_time, end_time, iterations, run_jobs, late_jobs,
@@ -38,7 +42,7 @@ func (db *DB) CreateSchedulerStats(stats *SchedulerStats) error {
 }
 
 // GetSchedulerStats retrieves scheduler stats for a period
-func (db *DB) GetSchedulerStats(startTime, endTime time.Time) ([]SchedulerStats, error) {
+func (db *DB) GetSchedulerStats(startTime, endTime time.Time) ([]model.SchedulerStats, error) {
 	query := `
 		SELECT
 			stats_period_id, start_time, end_time, iterations, run_jobs, late_jobs,
@@ -56,9 +60,9 @@ func (db *DB) GetSchedulerStats(startTime, endTime time.Time) ([]SchedulerStats,
 	}
 	defer rows.Close()
 
-	var stats []SchedulerStats
+	var stats []model.SchedulerStats
 	for rows.Next() {
-		var s SchedulerStats
+		var s model.SchedulerStats
 		err := rows.Scan(
 			&s.StatsPeriodID,
 			&s.StartTime,
@@ -89,13 +93,14 @@ func (db *DB) GetSchedulerStats(startTime, endTime time.Time) ([]SchedulerStats,
 	}
 
 	if stats == nil {
-		stats = []SchedulerStats{}
+		stats = []model.SchedulerStats{}
 	}
 
 	return stats, nil
 }
+
 // CreateOrchestratorStats records orchestrator statistics
-func (db *DB) CreateOrchestratorStats(stats *OrchestratorStats) error {
+func (db *DB) CreateOrchestratorStats(stats *model.OrchestratorStats) error {
 	query := `
 		INSERT INTO orchestrator_stats (
 			run_id, stats_period_id, runtime, constraints_checked, actions_taken
@@ -113,7 +118,7 @@ func (db *DB) CreateOrchestratorStats(stats *OrchestratorStats) error {
 }
 
 // CreateSyncerStats records syncer statistics for a period
-func (db *DB) CreateSyncerStats(stats *SyncerStats) error {
+func (db *DB) CreateSyncerStats(stats *model.SyncerStats) error {
 	query := `
 		INSERT INTO syncer_stats (
 			stats_period_id, start_time, end_time, total_writes, writes_succeeded, writes_failed,
@@ -152,7 +157,7 @@ func (db *DB) CreateSyncerStats(stats *SyncerStats) error {
 }
 
 // CreateStatsCollectorStats records stats collector statistics for a period
-func (db *DB) CreateStatsCollectorStats(stats *StatsCollectorStats) error {
+func (db *DB) CreateStatsCollectorStats(stats *model.StatsCollectorStats) error {
 	query := `
 		INSERT INTO stats_collector_stats (
 			stats_period_id, start_time, end_time, messages_received, messages_processed,
@@ -187,7 +192,7 @@ func (db *DB) CreateStatsCollectorStats(stats *StatsCollectorStats) error {
 }
 
 // GetSyncerStats retrieves syncer statistics for a time range
-func (db *DB) GetSyncerStats(startTime, endTime time.Time) ([]SyncerStats, error) {
+func (db *DB) GetSyncerStats(startTime, endTime time.Time) ([]model.SyncerStats, error) {
 	query := `
 		SELECT stats_period_id, start_time, end_time, total_writes, writes_succeeded, writes_failed,
 			avg_writes_in_flight, max_writes_in_flight, min_writes_in_flight,
@@ -206,9 +211,9 @@ func (db *DB) GetSyncerStats(startTime, endTime time.Time) ([]SyncerStats, error
 	}
 	defer rows.Close()
 
-	var stats []SyncerStats
+	var stats []model.SyncerStats
 	for rows.Next() {
-		var s SyncerStats
+		var s model.SyncerStats
 		err := rows.Scan(
 			&s.StatsPeriodID,
 			&s.StartTime,
@@ -243,14 +248,14 @@ func (db *DB) GetSyncerStats(startTime, endTime time.Time) ([]SyncerStats, error
 	}
 
 	if stats == nil {
-		stats = []SyncerStats{}
+		stats = []model.SyncerStats{}
 	}
 
 	return stats, nil
 }
 
 // GetStatsCollectorStats retrieves stats collector statistics for a time range
-func (db *DB) GetStatsCollectorStats(startTime, endTime time.Time) ([]StatsCollectorStats, error) {
+func (db *DB) GetStatsCollectorStats(startTime, endTime time.Time) ([]model.StatsCollectorStats, error) {
 	query := `
 		SELECT stats_period_id, start_time, end_time, messages_received, messages_processed,
 			scheduler_messages, orchestrator_messages, syncer_messages, webhook_messages,
@@ -268,9 +273,9 @@ func (db *DB) GetStatsCollectorStats(startTime, endTime time.Time) ([]StatsColle
 	}
 	defer rows.Close()
 
-	var stats []StatsCollectorStats
+	var stats []model.StatsCollectorStats
 	for rows.Next() {
-		var s StatsCollectorStats
+		var s model.StatsCollectorStats
 		err := rows.Scan(
 			&s.StatsPeriodID,
 			&s.StartTime,
@@ -302,7 +307,7 @@ func (db *DB) GetStatsCollectorStats(startTime, endTime time.Time) ([]StatsColle
 	}
 
 	if stats == nil {
-		stats = []StatsCollectorStats{}
+		stats = []model.StatsCollectorStats{}
 	}
 
 	return stats, nil

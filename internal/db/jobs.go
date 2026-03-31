@@ -3,6 +3,8 @@ package db
 import (
 	"database/sql"
 	"time"
+
+	"github.com/livinlefevreloca/itinerary/internal/model"
 )
 
 // =============================================================================
@@ -10,7 +12,7 @@ import (
 // =============================================================================
 
 // CreateJob creates a new job
-func (db *DB) CreateJob(job *Job) error {
+func (db *DB) CreateJob(job *model.Job) error {
 	now := time.Now()
 	job.CreatedAt = now
 	job.UpdatedAt = now
@@ -25,8 +27,8 @@ func (db *DB) CreateJob(job *Job) error {
 }
 
 // GetJob retrieves a job by ID
-func (db *DB) GetJob(id string) (*Job, error) {
-	job := &Job{}
+func (db *DB) GetJob(id string) (*model.Job, error) {
+	job := &model.Job{}
 
 	query := `
 		SELECT id, name, schedule, pod_spec, created_at, updated_at
@@ -55,7 +57,7 @@ func (db *DB) GetJob(id string) (*Job, error) {
 }
 
 // GetAllJobs retrieves all jobs
-func (db *DB) GetAllJobs() ([]Job, error) {
+func (db *DB) GetAllJobs() ([]model.Job, error) {
 	query := `
 		SELECT id, name, schedule, pod_spec, created_at, updated_at
 		FROM jobs
@@ -68,9 +70,9 @@ func (db *DB) GetAllJobs() ([]Job, error) {
 	}
 	defer rows.Close()
 
-	var jobs []Job
+	var jobs []model.Job
 	for rows.Next() {
-		var job Job
+		var job model.Job
 		err := rows.Scan(
 			&job.ID,
 			&job.Name,
@@ -91,14 +93,14 @@ func (db *DB) GetAllJobs() ([]Job, error) {
 
 	// Return empty slice instead of nil
 	if jobs == nil {
-		jobs = []Job{}
+		jobs = []model.Job{}
 	}
 
 	return jobs, nil
 }
 
 // UpdateJob updates an existing job
-func (db *DB) UpdateJob(job *Job) error {
+func (db *DB) UpdateJob(job *model.Job) error {
 	job.UpdatedAt = time.Now()
 
 	query := `
