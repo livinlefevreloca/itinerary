@@ -1,0 +1,329 @@
+package inbox
+
+import (
+	"log/slog"
+	"os"
+	"testing"
+	"time"
+)
+
+// testMessage is a simple message type for testing
+type testMessage struct {
+	ID   int
+	Data string
+}
+
+// =============================================================================
+// Send Tests
+// =============================================================================
+
+// TestInbox_Send_Success verifies that messages can be sent to an inbox with available buffer space.
+func TestInbox_Send_Success(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	inbox := New[testMessage](10, 100*time.Millisecond, logger)
+
+	// Send 5 messages
+	for i := 0; i < 5; i++ {
+		msg := testMessage{
+			ID:   i,
+			Data: "test",
+		}
+		success := inbox.Send(msg)
+		if !success {
+			t.Errorf("expected send %d to succeed", i)
+		}
+	}
+
+	stats := inbox.GetStats()
+	if stats.TotalSent != 5 {
+		t.Errorf("expected TotalSent to be 5, got %d", stats.TotalSent)
+	}
+
+	if stats.TimeoutCount != 0 {
+		t.Errorf("expected TimeoutCount to be 0, got %d", stats.TimeoutCount)
+	}
+}
+
+// TestInbox_Send_Timeout verifies that Send returns false when the inbox buffer is full and times out.
+func TestInbox_Send_Timeout(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	inbox := New[testMessage](2, 10*time.Millisecond, logger)
+
+	// Fill buffer with 2 messages
+	for i := 0; i < 2; i++ {
+		msg := testMessage{ID: i}
+		success := inbox.Send(msg)
+		if !success {
+			t.Errorf("expected send %d to succeed", i)
+		}
+	}
+
+	// Third send should timeout
+	msg := testMessage{ID: 3}
+	success := inbox.Send(msg)
+	if success {
+		t.Error("expected third send to timeout")
+	}
+
+	stats := inbox.GetStats()
+	if stats.TimeoutCount != 1 {
+		t.Errorf("expected TimeoutCount to be 1, got %d", stats.TimeoutCount)
+	}
+}
+
+// =============================================================================
+// Receive Tests
+// =============================================================================
+
+// TestInbox_TryReceive_Success verifies that TryReceive returns messages when inbox contains them.
+func TestInbox_TryReceive_Success(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	inbox := New[testMessage](10, 100*time.Millisecond, logger)
+
+	// Send 3 messages
+	for i := 0; i < 3; i++ {
+		msg := testMessage{ID: i}
+		inbox.Send(msg)
+	}
+
+	// Try to receive 3 messages
+	for i := 0; i < 3; i++ {
+		msg, ok := inbox.TryReceive()
+		if !ok {
+			t.Errorf("expected TryReceive %d to succeed", i)
+		}
+		if msg.ID != i {
+			t.Errorf("expected message ID %d, got %d", i, msg.ID)
+		}
+	}
+
+	stats := inbox.GetStats()
+	if stats.TotalReceived != 3 {
+		t.Errorf("expected TotalReceived to be 3, got %d", stats.TotalReceived)
+	}
+}
+
+// TestInbox_TryReceive_Empty verifies that TryReceive returns false when inbox is empty.
+func TestInbox_TryReceive_Empty(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	inbox := New[testMessage](10, 100*time.Millisecond, logger)
+
+	msg, ok := inbox.TryReceive()
+	if ok {
+		t.Error("expected TryReceive to return false for empty inbox")
+	}
+
+	if msg.ID != 0 {
+		t.Error("expected zero message value")
+	}
+}
+
+// TestInbox_Receive_Blocking verifies that Receive blocks until a message is available.
+func TestInbox_Receive_Blocking(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	inbox := New[testMessage](10, 100*time.Millisecond, logger)
+
+	// Start goroutine that will receive (blocks)
+	received := make(chan testMessage, 1)
+	go func() {
+		msg := inbox.Receive()
+		received <- msg
+	}()
+
+	// Give goroutine time to start and begin blocking
+	time.Sleep(50 * time.Millisecond)
+
+	sentMsg := testMessage{ID: 42, Data: "test"}
+	inbox.Send(sentMsg)
+
+	// Goroutine should unblock and receive message
+	select {
+	case msg := <-received:
+		if msg.ID != 42 {
+			t.Errorf("expected message ID 42, got %d", msg.ID)
+		}
+		if msg.Data != "test" {
+			t.Errorf("expected message data 'test', got %s", msg.Data)
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("timeout waiting for receive")
+	}
+}
+
+// =============================================================================
+// Statistics Tests
+// =============================================================================
+
+// TestInbox_UpdateDepthStats verifies that inbox depth statistics track current and maximum depths correctly.
+func TestInbox_UpdateDepthStats(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	inbox := New[testMessage](10, 100*time.Millisecond, logger)
+
+	// Send 5 messages
+	for i := 0; i < 5; i++ {
+		inbox.Send(testMessage{ID: i})
+	}
+
+	inbox.UpdateDepthStats()
+	stats := inbox.GetStats()
+	if stats.CurrentDepth != 5 {
+		t.Errorf("expected CurrentDepth to be 5, got %d", stats.CurrentDepth)
+	}
+	if stats.MaxDepthSeen != 5 {
+		t.Errorf("expected MaxDepthSeen to be 5, got %d", stats.MaxDepthSeen)
+	}
+
+	// Send 3 more (total 8)
+	for i := 0; i < 3; i++ {
+		inbox.Send(testMessage{ID: i + 5})
+	}
+
+	inbox.UpdateDepthStats()
+	stats = inbox.GetStats()
+	if stats.CurrentDepth != 8 {
+		t.Errorf("expected CurrentDepth to be 8, got %d", stats.CurrentDepth)
+	}
+	if stats.MaxDepthSeen != 8 {
+		t.Errorf("expected MaxDepthSeen to be 8, got %d", stats.MaxDepthSeen)
+	}
+
+	// Receive 4 messages (leaving 4)
+	for i := 0; i < 4; i++ {
+		inbox.TryReceive()
+	}
+
+	inbox.UpdateDepthStats()
+	stats = inbox.GetStats()
+	if stats.CurrentDepth != 4 {
+		t.Errorf("expected CurrentDepth to be 4, got %d", stats.CurrentDepth)
+	}
+	// MaxDepthSeen should still be 8
+	if stats.MaxDepthSeen != 8 {
+		t.Errorf("expected MaxDepthSeen to still be 8, got %d", stats.MaxDepthSeen)
+	}
+}
+
+// TestInbox_Len verifies that Len returns the current number of messages
+func TestInbox_Len(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	inbox := New[testMessage](10, 100*time.Millisecond, logger)
+
+	if inbox.Len() != 0 {
+		t.Errorf("expected Len to be 0, got %d", inbox.Len())
+	}
+
+	// Send 3 messages
+	for i := 0; i < 3; i++ {
+		inbox.Send(testMessage{ID: i})
+	}
+
+	if inbox.Len() != 3 {
+		t.Errorf("expected Len to be 3, got %d", inbox.Len())
+	}
+
+	// Receive 1 message
+	inbox.TryReceive()
+
+	if inbox.Len() != 2 {
+		t.Errorf("expected Len to be 2, got %d", inbox.Len())
+	}
+}
+
+// =============================================================================
+// Concurrency Tests
+// =============================================================================
+
+// TestInbox_ConcurrentSendReceive verifies that inbox handles concurrent sends and receives correctly.
+func TestInbox_ConcurrentSendReceive(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	inbox := New[testMessage](100, 100*time.Millisecond, logger)
+
+	const numSenders = 5
+	const numMessages = 20
+	expectedMessages := numSenders * numMessages
+
+	sendDone := make(chan bool)
+	receiveDone := make(chan int)
+
+	// Start concurrent receiver
+	go func() {
+		receivedCount := 0
+		for receivedCount < expectedMessages {
+			_, ok := inbox.TryReceive()
+			if ok {
+				receivedCount++
+			} else {
+				// Brief sleep if no messages available
+				time.Sleep(1 * time.Millisecond)
+			}
+		}
+		receiveDone <- receivedCount
+	}()
+
+	// Start concurrent senders
+	for i := 0; i < numSenders; i++ {
+		go func(id int) {
+			for j := 0; j < numMessages; j++ {
+				msg := testMessage{
+					ID:   id*numMessages + j,
+					Data: "concurrent",
+				}
+				inbox.Send(msg)
+			}
+			sendDone <- true
+		}(i)
+	}
+
+	// Wait for all senders to finish
+	for i := 0; i < numSenders; i++ {
+		<-sendDone
+	}
+
+	// Wait for receiver to finish and verify count
+	receivedCount := <-receiveDone
+	if receivedCount != expectedMessages {
+		t.Errorf("expected to receive %d messages, got %d", expectedMessages, receivedCount)
+	}
+}
+
+// =============================================================================
+// Generic Type Tests
+// =============================================================================
+
+// TestInbox_IntegerType verifies inbox works with integer type
+func TestInbox_IntegerType(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	inbox := New[int](5, 100*time.Millisecond, logger)
+
+	inbox.Send(42)
+	inbox.Send(100)
+
+	val, ok := inbox.TryReceive()
+	if !ok || val != 42 {
+		t.Errorf("expected 42, got %d", val)
+	}
+
+	val, ok = inbox.TryReceive()
+	if !ok || val != 100 {
+		t.Errorf("expected 100, got %d", val)
+	}
+}
+
+// TestInbox_StringType verifies inbox works with string type
+func TestInbox_StringType(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	inbox := New[string](5, 100*time.Millisecond, logger)
+
+	inbox.Send("hello")
+	inbox.Send("world")
+
+	val, ok := inbox.TryReceive()
+	if !ok || val != "hello" {
+		t.Errorf("expected 'hello', got '%s'", val)
+	}
+
+	val, ok = inbox.TryReceive()
+	if !ok || val != "world" {
+		t.Errorf("expected 'world', got '%s'", val)
+	}
+}

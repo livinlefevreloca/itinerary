@@ -1,0 +1,46 @@
+# Itinerary Configuration File
+# Development configuration
+
+[database]
+driver = "sqlite3"
+dsn = "itinerary.db"
+max_open_conns = 25
+max_idle_conns = 5
+conn_max_lifetime = "5m"
+conn_max_idle_time = "5m"
+migrations_dir = "migrations"
+skip_migrations = false
+
+[scheduler]
+loop_interval = "1s"
+index_rebuild_interval = "1m"
+pre_schedule_interval = "10s"
+lookahead_window = "10m"
+grace_period = "30s"
+inbox_buffer_size = 10000
+inbox_send_timeout = "5s"
+orchestrator_heartbeat_interval = "10s"
+max_missed_orchestrator_heartbeats = 3
+
+[syncer]
+max_buffered_job_run_updates = 10000
+job_run_channel_size = 200
+stats_channel_size = 100
+job_run_flush_threshold = 100
+job_run_flush_interval = "1s"
+stats_flush_threshold = 50
+stats_flush_interval = "5s"
+
+[http]
+enabled = true
+address = "0.0.0.0"
+port = 8080
+
+[metrics]
+enabled = true
+address = "0.0.0.0"
+port = 9090
+
+[logging]
+level = "info"
+format = "text"
